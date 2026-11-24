@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import db
 from .config import Config
+from .lifecycle import record_seen
 
 log = logging.getLogger("clipper")
 
@@ -58,6 +59,7 @@ def run_clean(cfg: Config, dry_run: bool = False, now: datetime | None = None) -
                     raise OSError("clip folder is outside the clips directory")      # never delete outside data/clips
                 size = folder_size(folder) if folder.is_dir() else 0
                 if not dry_run:
+                    record_seen(cfg, clip, "cleaned")          # a deleted news clip must never be made again
                     if folder.is_dir():
                         shutil.rmtree(folder)
                     db.delete_clip_row(cfg.database, clip["id"])

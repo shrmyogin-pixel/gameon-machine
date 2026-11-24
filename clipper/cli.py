@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"{len(res.exported)} {'would be exported' if args.dry_run else 'exported'}, {len(res.refused)} refused."
                       + (f"  Folder: {mp4.parent}" if res.exported else ""))
-                print("Nothing was uploaded: post these by hand, then press 'Mark Posted' in the review dashboard.")
+                print("Nothing was uploaded: post these by hand, then press 'Mark Uploaded' in the review dashboard.")
             return 0 if res.ok else 1
         if args.command == "news":
             import logging

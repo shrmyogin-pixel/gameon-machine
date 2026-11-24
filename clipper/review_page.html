@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gameon Review</title>
+<title>Game On Review</title>
 <style>
   :root {
     --bg: #14161a; --panel: #1e2126; --line: #31363e; --text: #e8eaed; --dim: #9aa0a8;
@@ -30,6 +30,8 @@
   .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #2a2f37; }
   .badge.status-rendered { background: #26334f; color: #9db6ff; }
+  .card.approved { border-color: #2a6b43; }
+  .gone { color: var(--dim); font-size: 12px; font-style: italic; }
   .badge.status-approved { background: #1b3d2a; color: var(--ok); }
   .badge.status-rejected, .badge.status-failed { background: #4a2223; color: #ff8a80; }
   .badge.status-posted { background: #3a2f55; color: #c8a8ff; }
@@ -60,7 +62,7 @@
   button:disabled { opacity: .45; cursor: not-allowed; }
   button.approve { background: #1b3d2a; border-color: #2a6b43; }
   button.reject { background: #4a2223; border-color: #7a3537; }
-  button.posted { background: #3a2f55; border-color: #5b4a8a; }
+  button.uploaded { background: #3a2f55; border-color: #5b4a8a; }
   button.save.dirty { border-color: var(--warn); color: var(--warn); }
   #empty { grid-column: 1 / -1; text-align: center; color: var(--dim); padding: 60px 0; }
   #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #2a2f37;
@@ -72,13 +74,14 @@
 </head>
 <body>
 <header>
-  <h1>Gameon Review</h1>
+  <h1>Game On Review</h1>
   <label>Status
     <select id="f-status">
+      <option value="active">inbox: to review + approved</option>
       <option value="rendered">rendered (to review)</option>
       <option value="approved">approved</option>
       <option value="rejected">rejected</option>
-      <option value="posted">posted</option>
+      <option value="posted">uploaded</option>
       <option value="skipped">skipped</option>
       <option value="failed">failed</option>
       <option value="new">new</option>
@@ -165,13 +168,15 @@ function fmtTime(s) {
 const num = (v) => (v === null || v === undefined ? "–" : Number(v).toFixed(1));
 
 function updateSummary() {
+  const label = { rendered: "to review", posted: "uploaded" };
   $("summary").textContent = ["rendered", "approved", "rejected", "posted", "skipped", "failed"]
-    .map((s) => `${s} ${counts[s] || 0}`).join("  ·  ");
+    .map((s) => `${label[s] || s} ${counts[s] || 0}`).join("  ·  ");
 }
 
 function card(clip) {
   const state = { dirty: false, busy: false };
-  const status = h("span", { class: "badge status-" + clip.status }, clip.status);
+  const statusText = { rendered: "To Review", approved: "Approved", posted: "Uploaded" }[clip.status] || clip.status;
+  const status = h("span", { class: "badge status-" + clip.status }, statusText);
   const title = h("input", { type: "text", maxlength: 100, value: clip.title || "", "aria-label": "Title" });
   const desc = h("textarea", { "aria-label": "Description" });
   desc.value = clip.description_body || "";
@@ -184,7 +189,8 @@ function card(clip) {
   const body = () => ({ title: title.value, description: desc.value,
     tags: tags.value.split(",").map((t) => t.trim()).filter(Boolean) });
 
-  const root = h("article", { class: "card" + (clip.sensitive ? " sensitive" : ""), "data-id": clip.id });
+  const root = h("article", { class: "card" + (clip.sensitive ? " sensitive" : "") + (clip.status === "approved" ? " approved" : ""),
+    "data-id": clip.id });
   const buttons = [];
   const act = (label, cls, action, confirmMsg) => {
     const b = h("button", { class: cls, onclick: () => doAction(action, confirmMsg) }, label);
@@ -195,7 +201,8 @@ function card(clip) {
   function replaceWith(newClip, newCounts) {
     counts = newCounts; updateSummary();
     const cur = $("f-status").value;
-    if (cur !== "all" && newClip.status !== cur) { root.remove(); checkEmpty(); return; }
+    const inView = cur === "all" || newClip.status === cur || (cur === "active" && ["rendered", "approved"].includes(newClip.status));
+    if (!inView) { root.remove(); checkEmpty(); return; }
     root.replaceWith(card(newClip));
   }
   async function save() {
@@ -219,7 +226,9 @@ function card(clip) {
     buttons.forEach((b) => (b.disabled = true));
     try {
       const r = await api(`/api/clips/${clip.id}/status`, { action });
-      toast({ approve: "Approved", reject: "Rejected", posted: "Marked as posted", undo: "Moved back to review" }[action]);
+      const msg = { approve: "Approved", reject: "Rejected", uploaded: "Marked as uploaded", undo: "Moved back to review" }[action];
+      const gone = (action === "reject" || action === "uploaded") && (r.deleted ? " - files deleted" : " - could not delete the files yet (try `clean`)");
+      toast(msg + (gone || ""), gone && !r.deleted);
       replaceWith(r.clip, r.counts);
     } catch (e) { toast(e.message, true); buttons.forEach((b) => (b.disabled = false)); }
   }
@@ -277,6 +286,8 @@ function card(clip) {
       style: "color:#8fb4ff" }, clip.source_url)] : null,
     clip.clip_start_s !== null && clip.clip_end_s !== null ? ` · cut ${num(clip.clip_start_s)}s–${num(clip.clip_end_s)}s` : ""));
   if (clip.sensitive) root.append(h("div", { class: "warn" }, "Review carefully: " + (clip.sensitive_reason || "flagged by the AI editor")));
+  if (clip.files_deleted) root.append(h("div", { class: "gone" }, "Files deleted when this clip was " +
+    (clip.status === "posted" ? "marked uploaded" : "rejected") + "."));
   if (clip.skip_reason) root.append(h("div", { class: "note" }, "Skipped: " + clip.skip_reason));
   if (clip.error) root.append(h("div", { class: "warn" }, "Error: " + clip.error));
   if (clip.hook) root.append(h("div", { class: "note" }, "Hook: " + clip.hook +
@@ -290,12 +301,14 @@ function card(clip) {
   const canReview = clip.can_review;
   const s = clip.status;
   root.append(h("div", { class: "buttons" }, saveBtn,
-    canReview && (s === "rendered" || s === "rejected") ? act("✔ Approve", "approve", "approve",
+    canReview && !clip.files_deleted && (s === "rendered" || s === "rejected") ? act("✔ Approve", "approve", "approve",
       clip.sensitive ? "This clip was flagged sensitive:\n" + (clip.sensitive_reason || "") + "\n\nApprove anyway?" : null) : null,
-    canReview && (s === "rendered" || s === "approved") ? act("✖ Reject", "reject", "reject") : null,
-    canReview && (s === "rendered" || s === "approved") ? act("📤 Mark Posted", "posted", "posted",
-      "Mark as posted? Only do this after you uploaded it yourself.") : null,
-    canReview && s !== "rendered" ? act("↩ Undo", "", "undo") : null));
+    canReview && (s === "rendered" || s === "approved") ? act("✖ Reject", "reject", "reject",
+      "Reject this clip? Its files are deleted immediately" + (clip.platform === "news" ? " and the story is never made again." : ".")) : null,
+    canReview && (s === "rendered" || s === "approved") ? act("📤 Mark Uploaded", "uploaded", "uploaded",
+      "Mark as uploaded? Only do this after you uploaded it yourself. The clip's files are deleted immediately" +
+      (clip.platform === "news" ? " and the story is never made again." : ".")) : null,
+    canReview && !clip.files_deleted && s !== "rendered" ? act("↩ Undo", "", "undo") : null));
   return root;
 }
 

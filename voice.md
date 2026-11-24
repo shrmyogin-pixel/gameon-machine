@@ -1,6 +1,6 @@
-# Gameon — Voice & Script Rules
+# Game On — Voice & Script Rules
 
-**Channel:** Gameon — fast-paced gaming news, leaks, free offers, and live-stream clipping.
+**Channel:** Game On — fast-paced gaming news, leaks, free offers, and live-stream clipping.
 **Format:** vertical YouTube Shorts, 30–40 seconds.
 
 ## Script length

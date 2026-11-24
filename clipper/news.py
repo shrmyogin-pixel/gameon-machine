@@ -31,14 +31,15 @@ from zoneinfo import ZoneInfo
 from . import db
 from .config import PROJECT_ROOT, Config, get_env_key
 from .hookscore import HookScore, banned_in, rank_hooks, words_of
-from .newsimage import fetch_news_image, image_from_entry
+from .lifecycle import story_keys, url_key
+from .newsimage import fetch_news_images, images_from_entry
 from .profanity import mask
 
 log = logging.getLogger("clipper")
 
 USER_AGENT = "gameon-clipper/1.0"
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
-FALLBACK_VOICES = ("en-US-GuyNeural", "en-US-AriaNeural")
+FALLBACK_VOICES = ("en-US-BrianNeural", "en-US-GuyNeural", "en-US-AriaNeural")   # all neutral, tried in order
 TTS_DEADLINE_SECONDS = 150
 HARD_SKIP = re.compile(r"\b(casino|casinos|sportsbook|betting|gambling|gamble|bet365|online slots|poker site)\b", re.I)
 KINDS = {"news": "BREAKING NEWS", "free_offer": "FREE GAME OFFER"}
@@ -56,7 +57,8 @@ class Story:
     summary: str
     link: str
     published: datetime
-    image_url: str | None = None      # the picture the RSS feed itself carries (if any)
+    image_url: str | None = None      # the first picture the RSS feed itself carries (if any)
+    image_urls: list = field(default_factory=list)   # every picture the feed entry carries
 
 
 @dataclass
@@ -106,8 +108,9 @@ def parse_feed(name: str, parsed, cutoff: datetime) -> list[Story]:
         published = datetime.fromtimestamp(timegm(when), timezone.utc)
         if published < cutoff:
             continue
+        urls = images_from_entry(e)
         out.append(Story(0, name, title, _clean(e.get("summary") or e.get("description") or ""), link, published,
-                         image_from_entry(e)))
+                         urls[0] if urls else None, urls))
     return out
 
 
@@ -118,6 +121,8 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
     hours = float(hours if hours is not None else cfg.news["hours"])
     cutoff = now - timedelta(hours=hours)
     seen_urls = db.news_urls_seen(cfg.database) if cfg.database.exists() else set()
+    seen_keys = db.seen_story_keys(cfg.database) if cfg.database.exists() else set()   # rejected / uploaded / cleaned
+    seen_keys |= {url_key(u) for u in seen_urls}
     found: list[Story] = []
     for feed in cfg.news_feeds:
         try:
@@ -133,6 +138,9 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
         key = re.sub(r"\W+", " ", s.title.lower()).strip()
         if s.link in links or key in titles:
             continue
+        if any(k in seen_keys for k in story_keys(s.link, s.title)):
+            log.info("news: skipped (story already made, rejected or uploaded): %s", s.title[:80])
+            continue
         if HARD_SKIP.search(s.title + " " + s.summary):
             log.info("news: skipped (gambling/betting): %s", s.title[:80])
             continue
@@ -146,7 +154,7 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
 
 
 # ------------------------------------------------------------------ Claude: pick + write
-PROMPT = """You are the news editor and scriptwriter of Gameon, a gaming news YouTube Shorts channel.
+PROMPT = """You are the news editor and scriptwriter of Game On, a gaming news YouTube Shorts channel.
 
 VOICE AND SCRIPT RULES (voice.md - follow them exactly):
 {voice}
@@ -323,9 +331,9 @@ def _rate_text(value: int) -> str:
     return f"{value:+d}%"
 
 
-async def _tts_once(text: str, voice: str, rate: str, out: Path) -> None:
+async def _tts_once(text: str, voice: str, rate: str, out: Path, pitch: str = "+0Hz") -> None:
     import edge_tts
-    await asyncio.wait_for(edge_tts.Communicate(text, voice, rate=rate).save(str(out)), timeout=30)
+    await asyncio.wait_for(edge_tts.Communicate(text, voice, rate=rate, pitch=pitch).save(str(out)), timeout=30)
 
 
 def synthesize(cfg: Config, text: str, out: Path, rate: str | None = None) -> str:
@@ -341,7 +349,7 @@ def synthesize(cfg: Config, text: str, out: Path, rate: str | None = None) -> st
                 raise NewsError(f"edge-tts gave up after {TTS_DEADLINE_SECONDS}s ({last})")
             try:
                 out.unlink(missing_ok=True)
-                asyncio.run(_tts_once(text, voice, rate, out))
+                asyncio.run(_tts_once(text, voice, rate, out, str(cfg.news["pitch"])))
                 if out.is_file() and out.stat().st_size > 2000:
                     return voice
                 last = "audio file was empty"
@@ -442,6 +450,44 @@ def credit_for_story(story: Story) -> str:
     return f"Sources & Credits: {story.outlet}, {story.link}"
 
 
+def collect_visuals(cfg: Config, story: Story, folder: Path) -> list[dict]:
+    """3-5 pictures for the story's cuts: the article's own, topped up to at least images_min with meme cards.
+
+    -> [{'file', 'url', 'source', 'kind': 'article' | 'meme'}]. Never raises; [] means the gradient background."""
+    if not cfg.news["images"]:
+        return []
+    try:
+        found = fetch_news_images(story, folder, float(cfg.news["image_timeout"]), int(cfg.news["images_max"]))
+    except Exception:
+        log.exception("news: picture hunt failed (ignored)")
+        found = []
+    visuals = [{**f, "kind": "article"} for f in found]
+    need = int(cfg.news["images_min"]) - len(visuals)
+    if need > 0:
+        from .memes import pick_memes
+        memes = [{"file": m, "url": None, "source": "assets/memes", "kind": "meme"}
+                 for m in pick_memes(cfg, need, story.link)]
+        # interleave: article, meme, article, meme ... so the cuts alternate instead of ending on memes
+        mixed, a, m = [], list(visuals), list(memes)
+        while a or m:
+            if a:
+                mixed.append(a.pop(0))
+            if m:
+                mixed.append(m.pop(0))
+        visuals = mixed
+    log.info("[%s] news visuals: %s", folder.name,
+             ", ".join(f"{v['kind']}:{v['source']}" for v in visuals) or "none (gradient)")
+    return visuals
+
+
+def choose_music(cfg: Config, seed: str) -> dict | None:
+    """A background track for this Short (Creative Commons or synthesized), or None when music is off / unavailable."""
+    from . import music
+    if not music.settings(cfg)["enabled"]:
+        return None
+    return music.pick_track(music.ensure_music(cfg), seed)
+
+
 def make_short(cfg: Config, pick: Pick) -> Path:
     """Build, render and register one news Short. Raises on failure (the caller records it)."""
     from .news_render import render_news_video
@@ -454,11 +500,8 @@ def make_short(cfg: Config, pick: Pick) -> Path:
                 source_url=story.link)
     try:
         (folder / "script.txt").write_text(pick.script + "\n", encoding="utf-8")
-        picture = None
-        if cfg.news["images"]:
-            picture = fetch_news_image(story, folder, float(cfg.news["image_timeout"]))     # None = gradient fallback
-            log.info("[%s] news picture: %s", folder.name,
-                     f"{picture['source']} {picture['width']}x{picture['height']}" if picture else "none (gradient)")
+        visuals = collect_visuals(cfg, story, folder)                 # [] = gradient background
+        track = choose_music(cfg, folder.name)                        # None = no music
         mp3 = folder / "voiceover.mp3"
         voice = synthesize(cfg, pick.script, mp3)
         dur = probe_duration(cfg, mp3)
@@ -477,14 +520,17 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         (folder / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
 
         info = {"hook": pick.hook.hook, "headline": pick.headline, "kind": pick.kind, "outlet": story.outlet,
-                "title": pick.title, "image": picture["file"] if picture else None}
+                "title": pick.title, "images": [v["file"] for v in visuals], "music": track}
         render = render_news_video(cfg, folder, info, words, dur)
 
         credit = credit_for_story(story)
         used_picture = render.get("background") == "picture"
+        used_music = render.get("music")                              # what the renderer REALLY used (it may have dropped it)
         credit_lines = [pick.description, f"Read the original story: {story.link}"]
-        if used_picture:
-            credit_lines.append(f"Image: {story.outlet} (article picture)")
+        if used_picture and any(v["kind"] == "article" for v in visuals):
+            credit_lines.append(f"Images: {story.outlet} (article pictures)")
+        if used_music and used_music.get("attribution"):
+            credit_lines.append(used_music["attribution"])          # the music license's required credit, automatically
         analysis = {
             "post": True, "status": "edited", "autopost": False, "needs_human_review": pick.sensitive,
             "score": pick.score, "banger": pick.score >= 9, "sensitive": pick.sensitive,
@@ -498,8 +544,11 @@ def make_short(cfg: Config, pick: Pick) -> Path:
                      "hooks": [{"hook": h.hook, "score": h.total, "valid": h.valid, "parts": h.parts,
                                 "reasons": h.reasons} for h in pick.hooks],
                      "voice": voice, "word_timestamps": how,
-                     "image": ({"url": picture["url"], "source": picture["source"], "used": used_picture}
-                               if picture else None)},
+                     "images": [{"url": v["url"], "source": v["source"], "kind": v["kind"], "used": used_picture}
+                                for v in visuals]},
+            "music": ({"title": used_music["title"], "file": used_music["file"], "attribution": used_music.get("attribution"),
+                       "artist": (track or {}).get("artist"), "license": (track or {}).get("license")}
+                      if used_music else None),
             "render": render}
         (folder / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
         db.record_analysis(cfg.database, folder.name, analysis, folder / "analysis.json")

@@ -89,9 +89,9 @@ class Config:
     @property
     def news(self) -> dict:
         return {"hours": 12, "stories": 4, "script_min_words": 80, "script_max_words": 105, "target_seconds": 35,
-                "voice": "en-US-AndrewNeural", "rate": "+6%", "groq_model": "whisper-large-v3-turbo",
+                "voice": "en-US-AndrewNeural", "rate": "+0%", "groq_model": "whisper-large-v3-turbo",
                 "max_candidates": 40, "auto_run": False, "run_times": [],
-                "images": True, "image_timeout": 15, **self.raw.get("news", {})}
+                "images": True, "image_timeout": 15, "images_min": 3, "images_max": 5, "pitch": "+0Hz", **self.raw.get("news", {})}
 
     @property
     def news_feeds(self) -> list[dict]:

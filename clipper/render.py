@@ -31,6 +31,7 @@ BOTTOM_H = H - TOP_H               # 1248: cropped gameplay panel
 DIVIDER = 4
 CAPTION_Y = 1180                   # centre of burned-in captions; the safe zone ends at y=1450
 SAFE_BOTTOM = 1450
+HOOK_Y = 190                       # hook top edge: below the Shorts top bar, clear of the search/camera icons
 WORDS_PER_CAPTION = 3
 TARGET_LUFS = -14.0
 CAM_REGION = (0.45, 0.55)          # corner search area: fraction of frame width, height
@@ -199,6 +200,46 @@ def caption_groups(words: list, start: float, end: float, per: int = WORDS_PER_C
     return out
 
 
+HOOK_COLOUR = "&H0000F0FF&"
+ACCENT = "&H0000D7FF&"          # ASS colour (BGR): warm yellow-gold for the key word
+ACCENT_WORDS = {"FREE", "LEAK", "LEAKED", "NEW", "BREAKING", "DELAYED", "CONFIRMED", "REVEALED", "BANNED", "EXCLUSIVE",
+                "RELEASE", "DLC", "UPDATE", "WIN", "WINS", "FINALLY", "SECRET", "HUGE", "INSANE", "OFFICIAL"}
+
+
+def pick_accent(words: list[str]) -> int | None:
+    """Index of the word to highlight: a number / price, a news trigger word, else the longest word (>= 6 letters)."""
+    plain = [re.sub(r"[^\w$%]", "", w).upper() for w in words]
+    for i, w in enumerate(plain):
+        if any(c.isdigit() for c in w) or w in ACCENT_WORDS:
+            return i
+    best = max(range(len(plain)), key=lambda i: len(plain[i]), default=None)
+    return best if best is not None and len(plain[best]) >= 6 and len(words) > 1 else None
+
+
+def accent_text(text: str, accent: str = ACCENT, base: str = "&H00FFFFFF&", index: int | None = -1) -> str:
+    """ASS text with one word in the accent colour (then back to `base`). Authors may force words with *word*;
+    otherwise pick_accent() chooses (index=None: no highlight)."""
+    def mark(w: str) -> str:
+        return "{" + "\\c" + accent + "}" + w + "{" + "\\c" + base + "}"
+    forced = re.findall(r"\*([^*]+)\*", text)
+    if forced:
+        marked = {w for chunk in forced for w in chunk.split(" ")}
+        return " ".join(mark(w) if w in marked else w for w in text.replace("*", "").split(" "))
+    words = text.split(" ")
+    i = pick_accent(words) if index == -1 else index
+    if i is None:
+        return text
+    words[i] = mark(words[i])
+    return " ".join(words)
+
+
+def pop_tags(ms: int = 220, start_pct: int = 72, peak_pct: int = 112, fade_ms: int = 90) -> str:
+    """Override tags: fade in + a quick scale pop (start small, overshoot, settle at 100%)."""
+    a = int(ms * 0.6)
+    return (r"\fad(%d,60)\fscx%d\fscy%d\t(0,%d,\fscx%d\fscy%d)\t(%d,%d,\fscx100\fscy100)"
+            % (fade_ms, start_pct, start_pct, a, peak_pct, peak_pct, a, ms))
+
+
 def stream_lang(payload: dict) -> str:
     """Language of the stream ('hi' for CarryMinati...), from config via payload.json; whisper's guess as backup."""
     lang = payload.get("stream", {}).get("lang") or payload.get("transcript", {}).get("language") or "en"
@@ -213,10 +254,11 @@ DEVANAGARI_FONTS = [("Nirmala UI", "Nirmala.ttf"), ("Nirmala UI", "Nirmala.ttc")
 def caption_fonts(lang: str, fonts_dir: Path | str = FONT_DIRS) -> dict:
     """Font family for each ASS style. English keeps Impact/Arial; Hindi uses a Windows Devanagari font."""
     if lang not in DEVANAGARI_LANGS:
-        return {"Hook": "Impact", "Cap": "Impact", "Meme": "Arial", "bold": 0, "cap_size": 100, "hook_size": 84}
+        return {"Hook": "Impact", "Cap": "Impact", "Meme": "Arial", "bold": 0, "cap_size": 100, "hook_size": 84,
+                "head": "Segoe UI Black" if (Path(fonts_dir) / "seguibl.ttf").is_file() else "Arial"}
     family = next((fam for fam, f in DEVANAGARI_FONTS if (Path(fonts_dir) / f).is_file()), DEVANAGARI_FONTS[0][0])
     # Nirmala UI is bold-capable and wider than Impact, so sizes come down a little
-    return {"Hook": family, "Cap": family, "Meme": family, "bold": -1, "cap_size": 84, "hook_size": 70}
+    return {"Hook": family, "Cap": family, "Meme": family, "bold": -1, "cap_size": 84, "hook_size": 70, "head": family}
 
 
 def build_ass(analysis: dict, words: list, start: float, end: float, layout: str, lang: str = "en",
@@ -233,16 +275,16 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,{f['Hook']},{f['hook_size']},&H0000F0FF,&H000000FF,&H20000000,&H00000000,{f['bold']},0,0,0,100,100,1,0,3,16,0,8,60,60,0,1
-Style: Cap,{f['Cap']},{f['cap_size']},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,{f['bold']},0,0,0,100,100,1,0,1,8,3,5,50,50,0,1
+Style: Hook,{f['Hook']},{f['hook_size']},&H0000F0FF,&H000000FF,&H00000000,&H96000000,{f['bold']},0,0,0,100,100,1,0,1,9,5,8,90,90,0,1
+Style: Cap,{f['Cap']},{f['cap_size']},&H00FFFFFF,&H000000FF,&H00000000,&H96000000,{f['bold']},0,0,0,100,100,1,0,1,9,5,5,90,90,0,1
 Style: Meme,{f['Meme']},46,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,8,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    lines = [f"Dialogue: 2,{_ass_time(0)},{_ass_time(dur)},Hook,,0,0,0,,{{\\an8\\pos({W // 2},150)}}{hook}"]
+    lines = [f"Dialogue: 2,{_ass_time(0)},{_ass_time(dur)},Hook,,0,0,0,,{{\\an8\\pos({W // 2},{HOOK_Y}){pop_tags(260)}}}{accent_text(hook, ACCENT, HOOK_COLOUR)}"]
     for a, b, text in caption_groups(words, start, end):
-        lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Cap,,0,0,0,,{{\\an5\\pos({W // 2},{CAPTION_Y})}}{text}")
+        lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Cap,,0,0,0,,{{\\an5\\pos({W // 2},{CAPTION_Y}){pop_tags()}}}{accent_text(text)}")
     if layout == "blur":  # the free space under the centred 16:9 gameplay, kept above the safe-zone limit
         meme = [_ass_text(mask(m)) for m in analysis.get("meme_caption", [])][:4]
         if meme:

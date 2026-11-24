@@ -2,7 +2,9 @@
 
 Status flow:  new -> skipped | failed | edited -> rendered -> approved | rejected -> posted
 ('edited' is the short step between the AI editor and the renderer.) Nothing here uploads anything;
-'posted' only records that a human posted the clip by hand (autopost = false).
+'posted' (the dashboard calls it "uploaded") only records that a human uploaded the clip by hand (autopost = false).
+Rejecting or uploading a clip deletes its files at once (lifecycle.py) and, for news, remembers the story in
+`seen_stories` so it is never made again.
 """
 from __future__ import annotations
 
@@ -27,6 +29,13 @@ CREATE TABLE IF NOT EXISTS clips (
     skip_reason TEXT,
     error      TEXT,
     slot       TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS seen_stories (
+    key        TEXT PRIMARY KEY,              -- 'u:<hash of the normalized article URL>' or 't:<hash of the headline>'
+    url        TEXT,
+    title      TEXT,
+    reason     TEXT,                          -- rejected | uploaded | cleaned
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
@@ -65,6 +74,7 @@ EXTRA_COLUMNS = {
     "route_at": "TEXT",           # next occurrence of that slot, Melbourne time (ISO)
     "route_rank": "INTEGER",      # 1 = best of the pending queue
     "assign_slot": "TEXT",        # HUMAN choice: posting slot name from config [[slots]] (beats the automatic routing)
+    "files_deleted_at": "TEXT",   # reject / mark-uploaded delete the clip folder; set when that happened
     "assign_target": "TEXT",      # HUMAN choice: 'youtube' (top 2-3) or 'other' platforms (beats the automatic routing)
 }
 ASSIGN_TARGETS = ("youtube", "other")
@@ -185,7 +195,9 @@ def row_to_dict(row: sqlite3.Row) -> dict:
 def list_clips(db_path: Path, status: str | None = None, handle: str | None = None, banger: bool | None = None,
                sensitive: bool | None = None, sort: str = "newest", limit: int = 500) -> list[dict]:
     where, args = [], []
-    if status:
+    if status == "active":                       # the dashboard inbox: to review + approved
+        where.append("status IN ('rendered', 'approved')")
+    elif status:
         where.append("status = ?")
         args.append(status)
     if handle:
@@ -233,6 +245,7 @@ ACTIONS = {
     "approve": ("approved", ("rendered", "rejected")),
     "reject": ("rejected", ("rendered", "approved")),
     "posted": ("posted", ("rendered", "approved")),
+    "uploaded": ("posted", ("rendered", "approved")),     # the dashboard's "Mark Uploaded" (same as "posted")
     "undo": ("rendered", ("approved", "rejected", "posted")),
 }
 
@@ -246,6 +259,8 @@ def review_action(db_path: Path, clip_id: int, action: str) -> dict:
         raise ReviewError("clip not found", 404)
     if clip["status"] not in allowed:
         raise ReviewError(f"cannot {action} a clip that is '{clip['status']}'", 409)
+    if clip.get("files_deleted_at") and new in ("approved", "rendered"):
+        raise ReviewError("this clip's files were deleted when it was rejected / uploaded", 409)
     with connect(db_path) as conn:
         conn.execute("UPDATE clips SET status = ?, reviewed_at = datetime('now'), updated_at = datetime('now'),"
                      " posted_at = CASE WHEN ? = 'posted' THEN datetime('now') WHEN ? = 'rendered' THEN NULL"
@@ -419,3 +434,25 @@ def clips_older_than(db_path: Path, status: str, cutoff_utc: str) -> list[dict]:
 def delete_clip_row(db_path: Path, clip_id: int) -> None:
     with connect(db_path) as conn:
         conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))
+
+
+# ------------------------------------------------------------------ seen stories + deleted files
+def add_seen(db_path: Path, keys: list[str], url: str | None, title: str | None, reason: str) -> None:
+    """Remember a story so `news` never makes it again (even after its clip row and folder are gone)."""
+    init_db(db_path)
+    with connect(db_path) as conn:
+        for key in keys:
+            conn.execute("INSERT OR IGNORE INTO seen_stories (key, url, title, reason) VALUES (?, ?, ?, ?)",
+                         (key, url, title, reason))
+
+
+def seen_story_keys(db_path: Path) -> set[str]:
+    init_db(db_path)
+    with connect(db_path) as conn:
+        return {r["key"] for r in conn.execute("SELECT key FROM seen_stories")}
+
+
+def mark_files_deleted(db_path: Path, clip_id: int) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET files_deleted_at = datetime('now'), clip_path = NULL, thumb_path = NULL,"
+                     " frames_path = NULL, updated_at = datetime('now') WHERE id = ?", (clip_id,))

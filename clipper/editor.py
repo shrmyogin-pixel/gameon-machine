@@ -22,7 +22,7 @@ from .proc import BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW
 
 log = logging.getLogger("clipper")
 
-PROMPT_TEMPLATE = """You are the editor of Gameon, a YouTube Shorts & Reels gaming news and live clipping channel. Decide whether a moment is worth posting and cut it precisely.
+PROMPT_TEMPLATE = """You are the editor of Game On, a YouTube Shorts & Reels gaming news and live clipping channel. Decide whether a moment is worth posting and cut it precisely.
 
 STREAM / SOURCE
 - Streamer/Channel: {streamer} | Platform: {platform} | Game: {game}

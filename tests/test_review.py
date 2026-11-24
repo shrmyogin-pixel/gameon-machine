@@ -11,6 +11,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from clipper import db, review
 from clipper.config import load_config
@@ -104,7 +105,7 @@ class ReviewTests(unittest.TestCase):
     def test_page_served(self):
         status, body, res = self.call("GET", "/", raw=True)
         self.assertEqual(status, 200)
-        self.assertIn(b"Gameon Review", body)
+        self.assertIn(b"Game On Review", body)
         self.assertIn("text/html", res.getheader("Content-Type"))
 
     def test_filters_and_sorting(self):
@@ -177,26 +178,198 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(status, 415)
         self.assertEqual(db.get_clip(self.cfg.database, cid)["status"], "rendered")  # nothing changed
 
-    def test_approve_reject_posted_undo_flow(self):
+    # ---------------------------------------------------------------- the inbox (default view)
+    def folder_of(self, cid):
+        return self.cfg.clips_dir / db.get_clip(self.cfg.database, cid)["folder"]
+
+    def act(self, cid, action):
+        status, data, _ = self.call("POST", f"/api/clips/{cid}/status", {"action": action})
+        return status, data
+
+    def make_news(self, name, url, headline, status="rendered"):
+        folder = self.cfg.clips_dir / name
+        folder.mkdir(parents=True)
+        (folder / "clip.mp4").write_bytes(MP4)
+        (folder / "thumb.jpg").write_bytes(b"\xff\xd8jpeg")
+        a = analysis(7.0, title=f"News {name}")
+        a["news"] = {"headline": headline, "url": url}
+        (folder / "analysis.json").write_text(json.dumps(a), encoding="utf-8")
+        db.add_clip(self.cfg.database, "news", "IGN", name, stream=url, source_url=url)
+        db.record_analysis(self.cfg.database, name, a, folder / "analysis.json")
+        db.record_files(self.cfg.database, name, folder)
+        db.set_clip_status(self.cfg.database, name, status)
+        return db.clip_by_folder(self.cfg.database, name)["id"]
+
+    def test_default_view_is_the_inbox_of_to_review_plus_approved(self):
+        a, b, c = self.ids["a"], self.ids["b"], self.ids["c"]
+        self.assertEqual(sorted(self.titles("")), ["Clip a", "Clip b", "Clip c"])             # no status given = inbox
+        self.assertEqual(sorted(self.titles("?status=active")), ["Clip a", "Clip b", "Clip c"])
+        status, data = self.act(a, "approve")
+        self.assertEqual((status, data["clip"]["status"]), (200, "approved"))
+        inbox = {c_["title"]: c_["status"] for c_ in self.clips("")["clips"]}
+        self.assertEqual(inbox, {"Clip a": "approved", "Clip b": "rendered", "Clip c": "rendered"})   # approved stays visible
+        self.assertEqual(self.titles("?status=approved"), ["Clip a"])                          # individual filters still work
+        self.assertEqual(sorted(self.titles("?status=rendered")), ["Clip b", "Clip c"])
+        self.assertEqual(len(self.clips("?status=all")["clips"]), 5)
+        # a NEW run keeps adding fresh clips to the same main view
+        self.make_news("news-new", "https://ign.com/new", "A new story headline")
+        self.assertEqual(len(self.clips("")["clips"]), 4)
+        self.assertEqual(self.clips("")["counts"]["approved"], 1)
+        # approved clips can still be un-approved, and skipped / failed never appear in the inbox
+        self.assertEqual(self.act(a, "undo")[1]["clip"]["status"], "rendered")
+        self.assertNotIn("Clip d", self.titles(""))
+
+    def test_the_page_has_the_inbox_default_badges_and_mark_uploaded(self):
+        status, body, _ = self.call("GET", "/", raw=True)
+        html = body.decode("utf-8")
+        self.assertIn('<option value="active">', html)
+        self.assertLess(html.index('<option value="active">'), html.index('<option value="rendered">'))   # first = default
+        for text in ("To Review", "Approved", "Mark Uploaded"):
+            self.assertIn(text, html)
+        self.assertNotIn("Mark Posted", html)
+
+    # ---------------------------------------------------------------- reject / mark uploaded delete files now
+    def test_reject_deletes_the_clip_folder_immediately_and_leaves_the_inbox(self):
         cid = self.ids["a"]
-        for action, expect in [("approve", "approved"), ("reject", "rejected"), ("approve", "approved"),
-                               ("posted", "posted"), ("undo", "rendered")]:
-            status, data, _ = self.call("POST", f"/api/clips/{cid}/status", {"action": action})
-            self.assertEqual(status, 200, data)
-            self.assertEqual(data["clip"]["status"], expect)
-            self.assertEqual(db.get_clip(self.cfg.database, cid)["status"], expect)   # persisted
-        self.assertIn("counts", data)
-        # posted records a time; undo clears it
-        self.assertIsNone(db.get_clip(self.cfg.database, cid)["posted_at"])
-        self.call("POST", f"/api/clips/{cid}/status", {"action": "posted"})
-        self.assertIsNotNone(db.get_clip(self.cfg.database, cid)["posted_at"])
-        self.call("POST", f"/api/clips/{cid}/status", {"action": "undo"})
+        folder = self.folder_of(cid)
+        self.assertTrue((folder / "clip.mp4").is_file())
+        status, data = self.act(cid, "reject")
+        self.assertEqual((status, data["clip"]["status"], data["deleted"]), (200, "rejected", True))
+        self.assertFalse(folder.exists())                                                   # gone from data/clips right now
+        row = db.get_clip(self.cfg.database, cid)
+        self.assertEqual(row["status"], "rejected")
+        self.assertIsNotNone(row["files_deleted_at"])
+        self.assertNotIn("Clip a", self.titles(""))                                         # out of the active queue
+        gone = self.clips("?status=rejected")["clips"][0]
+        self.assertEqual((gone["files_deleted"], gone["video_url"], gone["thumb_url"]), (True, None, None))
+        self.assertEqual(self.call("GET", f"/media/{cid}/clip.mp4", raw=True)[0], 404)
+        # nothing to bring back: approve / undo would resurrect a clip without files
+        for action in ("approve", "undo"):
+            self.assertEqual(self.act(cid, action)[0], 409, action)
+
+    def test_reject_an_approved_clip_also_deletes(self):
+        cid = self.ids["c"]
+        self.act(cid, "approve")
+        folder = self.folder_of(cid)
+        self.assertTrue(folder.exists())
+        self.assertEqual(self.act(cid, "reject")[1]["deleted"], True)
+        self.assertFalse(folder.exists())
+
+    def test_mark_uploaded_deletes_the_folder_immediately_and_accepts_both_names(self):
+        for key, action in (("a", "uploaded"), ("c", "posted")):
+            cid = self.ids[key]
+            if key == "a":
+                self.act(cid, "approve")                                                    # approved -> uploaded
+            folder = self.folder_of(cid)
+            self.assertTrue(folder.exists())
+            status, data = self.act(cid, action)
+            self.assertEqual((status, data["clip"]["status"], data["deleted"]), (200, "posted", True), action)
+            self.assertFalse(folder.exists(), action)
+            row = db.get_clip(self.cfg.database, cid)
+            self.assertIsNotNone(row["posted_at"])
+            self.assertIsNotNone(row["files_deleted_at"])
+        self.assertEqual(self.titles(""), ["Clip b"])                                       # only the untouched clip is left
+        self.assertEqual(sorted(self.titles("?status=posted")), ["Clip a", "Clip c"])
+        self.assertEqual(self.act(self.ids["a"], "undo")[0], 409)
+
+    def test_a_locked_folder_is_reported_kept_and_retried_by_clean(self):
+        from clipper import lifecycle
+        from clipper.clean import run_clean
+        cid = self.ids["a"]
+        folder = self.folder_of(cid)
+        with mock.patch.object(lifecycle.shutil, "rmtree", side_effect=OSError("file in use")):
+            status, data = self.act(cid, "reject")
+        self.assertEqual((status, data["deleted"], data["clip"]["status"]), (200, False, "rejected"))
+        self.assertTrue(folder.exists())
+        self.assertIsNone(db.get_clip(self.cfg.database, cid)["files_deleted_at"])
+        with db.connect(self.cfg.database) as conn:                                          # rejected 3 days ago
+            conn.execute("UPDATE clips SET reviewed_at = datetime('now', '-3 days') WHERE id = ?", (cid,))
+        res = run_clean(self.cfg)
+        self.assertEqual([c["id"] for c in res.deleted], [cid])
+        self.assertFalse(folder.exists())
+
+    def test_a_folder_outside_the_clips_dir_is_never_deleted(self):
+        outside = self.root / "precious"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("x")
+        cid = self.ids["a"]
+        with db.connect(self.cfg.database) as conn:
+            conn.execute("UPDATE clips SET folder = ? WHERE id = ?", ("../precious", cid))
+        status, data = self.act(cid, "reject")
+        self.assertEqual((status, data["deleted"]), (200, False))
+        self.assertTrue((outside / "keep.txt").is_file())
+
+    # ---------------------------------------------------------------- news stories are never made again
+    def test_rejecting_or_uploading_a_news_clip_remembers_its_story_before_deleting(self):
+        from clipper import lifecycle
+        a = self.make_news("news-a", "https://www.ign.com/articles/story-a/?utm_source=rss", "Story A headline is here")
+        b = self.make_news("news-b", "https://www.gamespot.com/articles/story-b", "Story B headline is here")
+        order = []
+        real_delete = lifecycle.delete_folder
+
+        def delete_spy(cfg, clip):
+            order.append(("deleted", sorted(db.seen_story_keys(cfg.database)) != []))      # was the story already saved?
+            return real_delete(cfg, clip)
+        with mock.patch.object(lifecycle, "delete_folder", delete_spy):
+            self.assertTrue(self.act(a, "reject")[1]["deleted"])
+            self.assertTrue(self.act(b, "uploaded")[1]["deleted"])
+        self.assertEqual(order, [("deleted", True), ("deleted", True)])                     # recorded BEFORE the delete
+        seen = db.seen_story_keys(self.cfg.database)
+        for url, headline in (("https://ign.com/articles/story-a?fbclid=1", "story a: headline is here!"),
+                              ("https://gamespot.com/articles/story-b/", "Something else entirely new")):
+            self.assertTrue(set(lifecycle.story_keys(url, headline)) & seen, url)          # same URL or same headline
+        self.assertFalse(set(lifecycle.story_keys("https://ign.com/articles/other", "A different story altogether")) & seen)
+        with db.connect(self.cfg.database) as conn:
+            rows = conn.execute("SELECT reason FROM seen_stories").fetchall()
+        self.assertEqual(sorted({r["reason"] for r in rows}), ["rejected", "uploaded"])
+
+    def test_live_clips_record_no_story(self):
+        self.act(self.ids["a"], "reject")
+        self.assertEqual(db.seen_story_keys(self.cfg.database), set())
+
+    def test_a_story_that_could_not_be_remembered_keeps_its_files(self):
+        from clipper import lifecycle
+        n = self.make_news("news-c", "https://ign.com/articles/story-c", "Story C headline is here")
+        folder = self.cfg.clips_dir / "news-c"
+        with mock.patch.object(lifecycle.db, "add_seen", side_effect=RuntimeError("db busy")):
+            status, data = self.act(n, "reject")
+        self.assertEqual((status, data["seen"], data["deleted"]), (200, False, False))
+        self.assertTrue(folder.exists())                                                    # nothing lost
+        self.assertEqual(db.get_clip(self.cfg.database, n)["status"], "rejected")
+
+    def test_news_never_remakes_a_rejected_or_uploaded_story(self):
+        import feedparser
+        from datetime import datetime, timedelta, timezone
+        from clipper import news
+        a = self.make_news("news-a", "https://ign.com/articles/story-a", "Story A headline is here")
+        b = self.make_news("news-b", "https://gamespot.com/articles/story-b", "Story B headline is here")
+        self.act(a, "reject")
+        self.act(b, "uploaded")
+        # the rows may later be cleaned away; the memory must survive that
+        from clipper.clean import run_clean
+        with db.connect(self.cfg.database) as conn:
+            conn.execute("UPDATE clips SET reviewed_at = datetime('now', '-9 days'), posted_at = datetime('now', '-9 days')")
+        self.assertEqual(len(run_clean(self.cfg).deleted), 2)
+        self.assertEqual([c for c in db.list_clips(self.cfg.database, limit=50) if c["platform"] == "news"], [])
+        now = datetime(2026, 11, 24, 10, 0, tzinfo=timezone.utc)
+        when = f"{now - timedelta(hours=1):%a, %d %b %Y %H:%M:%S} GMT"
+        item = "<item><title>{t}</title><link>{l}</link><description>d</description><pubDate>" + when + "</pubDate></item>"
+        xml = ("<?xml version='1.0'?><rss version='2.0'><channel><title>x</title>"
+               + item.format(t="Story A headline is here", l="https://ign.com/articles/story-a?utm_medium=x")
+               + item.format(t="Story B headline is here", l="https://www.gamespot.com/articles/story-b-reposted")
+               + item.format(t="Totally fresh story today", l="https://ign.com/articles/fresh")
+               + "</channel></rss>")
+        cfg = self.cfg
+        cfg.raw = {**cfg.raw, "feeds": [{"name": "IGN", "url": "u1"}]}
+        with mock.patch("feedparser.parse", return_value=feedparser.parse(xml)):
+            stories = news.fetch_stories(cfg, 12, now)
+        self.assertEqual([s.title for s in stories], ["Totally fresh story today"])
 
     def test_illegal_actions_rejected(self):
         skipped = self.clips("?status=skipped")["clips"][0]["id"]
         failed = self.clips("?status=failed")["clips"][0]["id"]
         for cid in (skipped, failed):
-            for action in ("approve", "reject", "posted", "undo"):
+            for action in ("approve", "reject", "posted", "uploaded", "undo"):
                 status, data, _ = self.call("POST", f"/api/clips/{cid}/status", {"action": action})
                 self.assertEqual(status, 409, (cid, action, data))
         status, _, _ = self.call("POST", f"/api/clips/{self.ids['c']}/status", {"action": "explode"})

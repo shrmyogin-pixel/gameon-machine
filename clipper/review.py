@@ -2,8 +2,10 @@
 
 * Binds to 127.0.0.1 only (never reachable from the network). Host and Origin headers are checked, and
   every change needs a JSON body, so a web page you happen to visit cannot click buttons for you.
-* Approve / Reject / Mark Posted and the Slot / Send-to choices only record your decision in the database. Nothing is ever uploaded
-  (autopost = false); you post by hand.
+* Approve / Reject / Mark Uploaded and the Slot / Send-to choices only record your decision in the database. Nothing is
+  ever uploaded (autopost = false); you upload by hand. Reject and Mark Uploaded also delete the clip's folder at once
+  (and remember a news story so it is never made again), see lifecycle.py.
+* The default view ("active") is the inbox: clips to review plus approved clips.
 * Video and thumbnail are served by clip id from the clip's own folder with fixed file names, so no
   path from the browser is ever opened.
 """
@@ -21,6 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import db
 from .config import Config
+from .lifecycle import discard
 from .routing import assign_routes
 
 log = logging.getLogger("clipper")
@@ -42,6 +45,7 @@ def clip_view(clip: dict, clips_dir: Path) -> dict:
     out["description_body"], out["credit"] = db.split_description(clip)
     out["can_review"] = clip["status"] in db.REVIEW_STATUSES
     out["can_route"] = clip["status"] in ("rendered", "approved")
+    out["files_deleted"] = bool(clip.get("files_deleted_at"))
     return out
 
 
@@ -121,10 +125,10 @@ class Handler(BaseHTTPRequestHandler):
     def _list(self, q: dict) -> None:
         def one(name):
             return (q.get(name) or [""])[0].strip() or None
-        status = one("status")
+        status = one("status") or "active"
         if status == "all":
             status = None
-        elif status and status not in db.STATUSES:
+        elif status and status != "active" and status not in db.STATUSES:
             return self._error(400, "unknown status")
         sort = one("sort") or "newest"
         if sort not in ("newest", "score", "prescore"):
@@ -217,6 +221,11 @@ class Handler(BaseHTTPRequestHandler):
                 if m.group(2) == "status":
                     clip = db.review_action(self.cfg.database, clip_id, str(body.get("action", "")))
                     log.info("[%s] review: %s -> %s", clip["folder"], body.get("action"), clip["status"])
+                    if clip["status"] in ("rejected", "posted"):          # reject / mark uploaded: files go now
+                        outcome = discard(self.cfg, clip, "rejected" if clip["status"] == "rejected" else "uploaded")
+                        clip = db.get_clip(self.cfg.database, clip_id)
+                        return self._json(200, {"clip": clip_view(clip, self.cfg.clips_dir),
+                                                "counts": db.status_counts(self.cfg.database), **outcome})
                 elif m.group(2) == "route":
                     clip = self._route(clip_id, body)
                 else:

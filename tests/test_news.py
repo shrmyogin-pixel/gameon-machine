@@ -15,7 +15,7 @@ from unittest import mock
 
 import feedparser
 
-from clipper import db, hookscore, news, news_render
+from clipper import db, hookscore, news, news_render, newsimage
 from clipper.config import load_config
 from clipper.hookscore import best_hook, rank_hooks, score_hook
 
@@ -124,6 +124,25 @@ class FeedTests(unittest.TestCase):
             self.assertNotIn("Best casino bonuses", titles)
             self.assertEqual(sum(t.lower().startswith("same title") for t in titles), 1)   # duplicate headline dropped
             self.assertEqual([s.id for s in stories], list(range(1, len(stories) + 1)))
+
+
+    def test_stories_rejected_or_uploaded_before_are_never_fetched_again(self):
+        from clipper import lifecycle
+        cfg = load_config()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            cfg.database = Path(tmp) / "c.sqlite"
+            db.init_db(cfg.database)
+            # the story is remembered by its normalized URL (tracking parameters and www. do not matter) ...
+            db.add_seen(cfg.database, lifecycle.story_keys("https://www.ign.com/a/old-story/?utm_source=x", "Old story headline here"),
+                        "https://www.ign.com/a/old-story/", "Old story headline here", "rejected")
+            cfg.raw = {**cfg.raw, "feeds": [{"name": "IGN", "url": "u1"}, {"name": "PCG", "url": "u2"}]}
+            feeds = {"u1": rss([("Brand new thing", "https://ign.com/a/old-story?fbclid=zzz", "", NOW - timedelta(hours=1)),
+                                ("Fresh one today", "https://ign.com/a/fresh", "", NOW - timedelta(hours=2))]),
+                     # ... or by its headline (another outlet, another URL)
+                     "u2": rss([("OLD story: headline here!", "https://pcg.com/other-url", "", NOW - timedelta(hours=1))])}
+            with mock.patch.object(feedparser, "parse", side_effect=lambda url, agent=None: feeds[url]):
+                titles = [s.title for s in news.fetch_stories(cfg, 12, NOW)]
+        self.assertEqual(titles, ["Fresh one today"])
 
 
 # ---------------------------------------------------------------- Claude reply validation
@@ -253,14 +272,14 @@ class VoiceTests(unittest.TestCase):
     def test_synthesize_retries_then_falls_back_to_another_voice(self):
         calls = []
 
-        async def fake(text, voice, rate, out):
+        async def fake(text, voice, rate, out, pitch=None):
             calls.append((voice, rate))
             if voice == self.cfg.news["voice"]:
                 raise RuntimeError("NoAudioReceived")
             out.write_bytes(b"x" * 5000)
         with mock.patch.object(news, "_tts_once", side_effect=fake), mock.patch.object(news.time, "sleep"):
             voice = news.synthesize(self.cfg, "hello", self.out)
-        self.assertEqual(voice, "en-US-GuyNeural")
+        self.assertEqual(voice, "en-US-BrianNeural")
         self.assertEqual(len(calls), 4)                                               # 3 tries on the first voice, then the fallback
         self.assertEqual({r for _, r in calls}, {self.cfg.news["rate"]})
 
@@ -371,7 +390,12 @@ class MakeShortTests(unittest.TestCase):
         self.cfg.clips_dir = root / "clips"
         self.cfg.data_dir = root
         self.cfg.raw = {**self.cfg.raw, "clip": {**self.cfg.raw.get("clip", {}), "min_seconds": 1, "max_seconds": 40},
-                        "notify": {"enabled": False}, "watermark": {**self.cfg.raw.get("watermark", {}), "file": str(root / "wm.png")}}
+                        "notify": {"enabled": False}, "watermark": {**self.cfg.raw.get("watermark", {}), "file": str(root / "wm.png")},
+                        "news": {**self.cfg.raw.get("news", {}), "memes_dir": str(root / "memes")},
+                        "music": {"enabled": False}}          # music + pictures have their own tests (test_newsimage.py)
+        patcher = mock.patch.object(newsimage, "download", side_effect=OSError("offline in tests"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def pick(self, sid=1, outlet="IGN"):
         return news.validate_reply(json.dumps({"stories": [reply(sid)]}), [story(sid, outlet)], self.cfg)[0]
@@ -476,7 +500,12 @@ class MakeShortTests(unittest.TestCase):
         words = [[0.2, 0.5, "this"], [0.5, 0.8, "is"], [0.8, 1.1, "shit"], [1.1, 1.4, "so"]]
         ass = news_render.build_news_ass(info, words, 5.0)
         self.assertIn("FREE GAME OFFER", ass)
-        self.assertIn("GTA 6 OFFICIALLY HITS PLAYSTATION RECORDS", ass)
+        import re
+        plain = re.sub(r"\{[^}]*\}", "", ass)                                           # text without override tags
+        self.assertIn("GTA 6 OFFICIALLY HITS PLAYSTATION RECORDS", plain)
+        self.assertIn("{\\c&H0000D7FF&}6{", ass)                                        # the number is the accent word
+        self.assertIn("\\fscx72", ass)                                                  # pop-in animation on the captions
+        self.assertIn("xfade", Path(news_render.__file__).read_text(encoding="utf-8"))
         self.assertIn("Source: IGN", ass)
         self.assertIn("THIS IS S***", ass)                                              # captions: 3 words, masked
         self.assertIn(f"\\pos(540,{news_render.CAPTION_Y})", ass)

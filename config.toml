@@ -3,7 +3,7 @@
 # $HOME is replaced with your user folder automatically.
 
 [general]
-channel_name = "Gameon"
+channel_name = "Game On"
 timezone = "Australia/Melbourne"
 autopost = false            # Zero-Ban Policy: never upload automatically
 
@@ -87,13 +87,17 @@ corner = "left"                    # "left" or "right"; bottom, above the y=1450
 [news]
 hours = 12                         # only stories newer than this
 stories = 4                        # news Shorts per run (repeat stories are skipped: same URL, same headline, same event)
-images = true                      # use the article's real picture (feed image / og:image) with Ken Burns; false = gradient only
+images = true                      # cut between the article's real pictures (3-5, with Ken Burns); false = gradient only
+images_min = 3                     # fewer real pictures than this -> topped up with the meme cards in assets/memes/
+images_max = 5
 image_timeout = 15                 # seconds per picture / article-page download
+memes_dir = "assets/memes"         # your own gameplay / meme images go here (original reaction cards are generated if empty)
 script_min_words = 80
 script_max_words = 105             # ~35 seconds spoken
 target_seconds = 35
-voice = "en-US-AndrewNeural"       # edge-tts voice
-rate = "+6%"
+voice = "en-US-AndrewNeural"       # edge-tts voice: neutral and natural (fallbacks: Brian, Guy, Aria - all neutral)
+rate = "+0%"                       # natural pace; the renderer nudges it only if the voiceover misses 30-40 s
+pitch = "+0Hz"
 groq_model = "whisper-large-v3-turbo"   # word timestamps (GROQ_API_KEY in .env)
 max_candidates = 40                # newest headlines shown to Claude
 auto_run = true                    # `run` / run.bat also makes news Shorts at the times below
@@ -109,6 +113,13 @@ posted_days = 7             # posted clips older than this
 enabled = true              # Windows toast when a strong clip finishes rendering (falls back to a console beep + log)
 min_score = 8               # toast when the AI score is at least this ...
 banger = true               # ... or when the AI editor flagged the clip as a banger
+
+# ---- Background music for news Shorts: assets/music/ (+ credits.json with the license text) ----
+[music]
+enabled = true
+dir = "assets/music"
+track_lufs = -25.0                 # music bed level (-24..-28 LUFS): audible, with the voiceover ducking it a few dB while it speaks
+final_lufs = -14.0                 # the finished Short's loudness
 
 # ---- Posting slots (Melbourne time, AEDT = UTC+11) ----
 [[slots]]

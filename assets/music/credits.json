@@ -1,0 +1,49 @@
+{
+  "_note": "Every track here needs the attribution line below in the video description (the news engine and the exporter add it automatically). Music by Kevin MacLeod is free to use under CC BY 4.0 with that credit.",
+  "tracks": [
+    {
+      "file": "newer-wave.mp3",
+      "title": "Newer Wave",
+      "artist": "Kevin MacLeod",
+      "source": "incompetech.com",
+      "license": "Creative Commons: By Attribution 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Newer%20Wave.mp3",
+      "page": "https://incompetech.com/music/royalty-free/music.html",
+      "attribution": "Music: \"Newer Wave\" Kevin MacLeod (incompetech.com) - Licensed under Creative Commons: By Attribution 4.0 License - https://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "file": "investigations.mp3",
+      "title": "Investigations",
+      "artist": "Kevin MacLeod",
+      "source": "incompetech.com",
+      "license": "Creative Commons: By Attribution 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Investigations.mp3",
+      "page": "https://incompetech.com/music/royalty-free/music.html",
+      "attribution": "Music: \"Investigations\" Kevin MacLeod (incompetech.com) - Licensed under Creative Commons: By Attribution 4.0 License - https://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "file": "sneaky-snitch.mp3",
+      "title": "Sneaky Snitch",
+      "artist": "Kevin MacLeod",
+      "source": "incompetech.com",
+      "license": "Creative Commons: By Attribution 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Sneaky%20Snitch.mp3",
+      "page": "https://incompetech.com/music/royalty-free/music.html",
+      "attribution": "Music: \"Sneaky Snitch\" Kevin MacLeod (incompetech.com) - Licensed under Creative Commons: By Attribution 4.0 License - https://creativecommons.org/licenses/by/4.0/"
+    },
+    {
+      "file": "local-forecast-elevator.mp3",
+      "title": "Local Forecast - Elevator",
+      "artist": "Kevin MacLeod",
+      "source": "incompetech.com",
+      "license": "Creative Commons: By Attribution 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "url": "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Local%20Forecast%20-%20Elevator.mp3",
+      "page": "https://incompetech.com/music/royalty-free/music.html",
+      "attribution": "Music: \"Local Forecast - Elevator\" Kevin MacLeod (incompetech.com) - Licensed under Creative Commons: By Attribution 4.0 License - https://creativecommons.org/licenses/by/4.0/"
+    }
+  ]
+}

@@ -84,6 +84,15 @@ def free_name(folder: Path, base: str) -> str:
 
 
 # ------------------------------------------------------------------ upload sheet
+def music_attribution(folder: Path) -> str | None:
+    """The license credit of the background music this Short was rendered with (analysis.json 'music'), or None."""
+    try:
+        line = (json.loads((folder / "analysis.json").read_text(encoding="utf-8")).get("music") or {}).get("attribution")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return mask(str(line)).strip() if line else None
+
+
 def hashtags_for(clip: dict, folder: Path) -> list[str]:
     """From the AI editor's analysis.json; falls back to the clip's tags. Masked, '#'-prefixed, no spaces."""
     raw: list = []
@@ -154,6 +163,9 @@ def build_sheet(clip: dict, folder: Path, mp4_name: str, thumb_name: str | None,
     tags = fit_tags(clip.get("tags", []))
     hashtags = hashtags_for(clip, folder)
     # hashtags go above the credit line so the description still ENDS with 'Sources & Credits:'
+    music = music_attribution(folder)
+    if music and music not in body:          # the track's license needs this line: add it even if the text was edited
+        body = f"{body}\n{music}".strip()
     full = "\n\n".join(x for x in (body, " ".join(hashtags), credit) if x)
     notes = [f"Video file:  {mp4_name}", f"Thumbnail:   {thumb_name or '(none)'}",
              f"Streamer:    {clip['handle']} ({clip['platform']})", f"Clip id:     {clip['id']}"]
@@ -179,6 +191,8 @@ def build_sheet(clip: dict, folder: Path, mp4_name: str, thumb_name: str | None,
         ", ".join(tags) or "(none)", "",
         SHEET_RULE, "NOT FOR PASTING", SHEET_RULE, *notes, ""])
     verify_sheet(sheet)
+    if music and music not in sheet_description(sheet):
+        raise ExportRefused("the background music's attribution line is missing from the description")
     return sheet
 
 
