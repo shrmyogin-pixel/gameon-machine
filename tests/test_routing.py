@@ -124,8 +124,8 @@ class VolumeCapTests(unittest.TestCase):
         self.assertEqual(cfg.volume["daily_target"], 15)
         self.assertEqual(cfg.volume["news_per_day"] + cfg.volume["live_max_per_day"], 15)
         self.assertEqual(cfg.news["stories"], 4)
-        # the scheduled runs can cover the daily news quota, and the quota (not the run count) is the cap
-        self.assertGreaterEqual(cfg.news["stories"] * len(cfg.news["run_times"]), cfg.volume["news_per_day"])
+        self.assertFalse(cfg.news["auto_run"])            # news is run by hand (news.bat), never on a clock
+        self.assertEqual(cfg.news["run_times"], [])
         self.assertTrue(10 <= cfg.volume["daily_target"] <= 15)
         self.assertEqual(cfg.render["max_renders"], 1)
         self.assertTrue(cfg.raw["encoding"]["below_normal_priority"])

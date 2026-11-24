@@ -352,38 +352,6 @@ class VoiceTests(unittest.TestCase):
             self.assertEqual(news.get_words(self.cfg, self.out, " ".join(["w"] * 50), 20.0)[1], "estimated")   # heard far too few words
 
 
-# ---------------------------------------------------------------- scheduling
-class ScheduleTests(unittest.TestCase):
-    def test_due_run(self):
-        times = ["07:30", "13:30", "19:30"]
-        at = lambda h, m: datetime(2026, 11, 24, h, m)
-        self.assertIsNone(news.due_run(at(7, 29), times, set()))
-        self.assertEqual(news.due_run(at(7, 30), times, set()), "2026-11-24 07:30")
-        self.assertEqual(news.due_run(at(9, 0), times, set()), "2026-11-24 07:30")           # a little late is fine
-        self.assertIsNone(news.due_run(at(9, 0), times, {"2026-11-24 07:30"}))               # but only once
-        self.assertIsNone(news.due_run(at(11, 0), times, set()))                              # missed by more than 3h: skipped
-        self.assertEqual(news.due_run(at(14, 0), times, {"2026-11-24 07:30"}), "2026-11-24 13:30")
-        self.assertIsNone(news.due_run(at(12, 0), ["bad", "25:xx"], set()))
-
-    def test_scheduler_runs_once_per_slot_and_survives_errors(self):
-        cfg = load_config()
-        cfg.raw = {**cfg.raw, "news": {"run_times": ["07:30"]}}
-        stop = threading.Event()
-        runs = []
-
-        def runner(c):
-            runs.append(1)
-            stop.set()
-            raise RuntimeError("boom")
-        sched = news.NewsScheduler(cfg, stop, runner)
-        with mock.patch.object(news, "due_run", return_value="k1"):
-            sched.start()
-            sched.join(timeout=10)
-        self.assertEqual(runs, [1])
-        self.assertFalse(sched.is_alive())
-        self.assertIn("k1", sched.done)
-
-
 # ---------------------------------------------------------------- a whole Short, real ffmpeg
 class MakeShortTests(unittest.TestCase):
     @classmethod

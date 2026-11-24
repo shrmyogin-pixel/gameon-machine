@@ -103,8 +103,8 @@ pitch = "+0Hz"
 groq_model = "whisper-large-v3-turbo"   # word timestamps (GROQ_API_KEY in .env)
 max_candidates = 40                # headlines shown to Claude, balanced across the four buckets below (newest first within each)
 bucket_max = 2                     # at most this many Shorts of one bucket per run: streamer / giveaway / achievement / whats_new
-auto_run = true                    # `run` / run.bat also makes news Shorts at the times below
-run_times = ["07:30", "13:30", "19:30"]   # local (Melbourne) time
+auto_run = false                   # no automatic news: run news.bat (python -m clipper news) by hand each night
+run_times = []                     # unused: there is no clock scheduler any more
 
 # ---- Trend discovery: python -m clipper trends (also at the end of every `news` run) ----
 # Reads public metadata only (YouTube search via yt-dlp, GamerPower giveaways). Claude verifies the core fact and rewrites it

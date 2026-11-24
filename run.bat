@@ -5,6 +5,7 @@ rem
 rem  - activates .venv
 rem  - python -m clipper run   = watch + spike detection + clip workers +
 rem                              headless Claude editing + hardware rendering
+rem  - no automatic news: run news.bat by hand each night, then export.bat
 rem  - keep-awake: the Python process asks Windows not to sleep while it runs
 rem    (the screen may still turn off; closing a laptop lid or choosing Sleep
 rem    yourself still sleeps the PC)

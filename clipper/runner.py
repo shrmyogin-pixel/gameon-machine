@@ -147,12 +147,6 @@ def run(cfg: Config, streams: list[dict], seconds: float | None = None, recorder
     for s in slots:
         s.rec.start()
         print(f"  - {s.rec.name_}")
-    scheduler = None
-    if cfg.news["auto_run"] and cfg.news["run_times"]:
-        from .news import NewsScheduler
-        scheduler = NewsScheduler(cfg, stop)
-        scheduler.start()
-        print(f"News Shorts: scheduled at {', '.join(cfg.news['run_times'])} (local time)")
     deadline = time.monotonic() + seconds if seconds else None
     last_beat = 0.0
     try:
@@ -171,9 +165,6 @@ def run(cfg: Config, streams: list[dict], seconds: float | None = None, recorder
         write_state(cfg, started, slots, stopping=True)
         for s in slots:
             s.rec.join(timeout=45)
-        if scheduler is not None and scheduler.is_alive():
-            print("Waiting for the news run in progress (up to 3 minutes)...")
-            scheduler.join(timeout=180)
         print("Finishing any clips in progress...")
         try:
             pool.close()
