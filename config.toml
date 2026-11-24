@@ -46,6 +46,14 @@ context_before = 75         # seconds of footage kept before a spike
 context_after = 45          # seconds kept after it (the worker waits this long first)
 workers = 2                 # clipper workers running at the same time (whisper is heavy)
 
+[ai]
+model = "sonnet"            # headless Claude editor (claude -p --model ...)
+min_score = 6               # normal mode: clips scoring below this are skipped
+launch_mode = true          # channel-launch mode: use launch_min_score instead, so more clips get through
+launch_min_score = 5
+timeout_seconds = 240       # per Claude call
+retries = 1                 # extra attempts when the reply is not valid JSON / exit code != 0
+
 # ---- Posting slots (Melbourne time, AEDT = UTC+11) ----
 [[slots]]
 name = "Slot 1 - US Peak"

@@ -32,6 +32,8 @@ def add_clip(db_path: Path, platform: str, handle: str, folder: str) -> None:
                      (platform, handle, folder))
 
 
-def set_clip_status(db_path: Path, folder: str, status: str, error: str | None = None) -> None:
+def set_clip_status(db_path: Path, folder: str, status: str, error: str | None = None,
+                    skip_reason: str | None = None) -> None:
     with sqlite3.connect(db_path, timeout=30) as conn:
-        conn.execute("UPDATE clips SET status = ?, error = ? WHERE folder = ?", (status, error, folder))
+        conn.execute("UPDATE clips SET status = ?, error = ?, skip_reason = ? WHERE folder = ?",
+                     (status, error, skip_reason, folder))

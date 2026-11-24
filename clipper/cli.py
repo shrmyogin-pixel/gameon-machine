@@ -29,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("test-cut", help="run whisper-cli and make frames.jpg for any video file (no live stream needed)")
     c.add_argument("video", help="path to any .mp4")
     c.add_argument("--lang", default="en", help="language code: en uses the English model, others the multilingual one (default en)")
+    e = sub.add_parser("edit", help="run the Claude AI editor on an existing clip folder (needs payload.json + frames.jpg)")
+    e.add_argument("folder", help="clip folder, e.g. data/clips/twitch-lacy-20260101-120000")
     args = parser.parse_args(argv)
 
     try:
@@ -87,6 +89,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             print(f"Done. Files in {folder}")
             return 0
+        if args.command == "edit":
+            from pathlib import Path
+
+            from .editor import edit_clip
+
+            folder = Path(args.folder).expanduser().resolve()
+            if not (folder / "payload.json").is_file():
+                print(f"No payload.json in {folder}")
+                return 1
+            status = edit_clip(cfg, folder)
+            print(f"Editor result: {status}  ({folder / 'analysis.json'})")
+            return 0 if status != "failed" else 1
         if args.command == "detect-replay":
             from pathlib import Path
 

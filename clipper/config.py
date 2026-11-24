@@ -65,6 +65,12 @@ class Config:
                     "min_seconds": 30, "max_seconds": 40}
         return {**defaults, **self.raw.get("clip", {})}
 
+    @property
+    def ai(self) -> dict:
+        defaults = {"model": "sonnet", "min_score": 6, "launch_mode": True, "launch_min_score": 5,
+                    "timeout_seconds": 240, "retries": 1}
+        return {**defaults, **self.raw.get("ai", {})}
+
     def whisper_model_for(self, lang: str) -> Path:
         """English streams use the faster English-only model; everything else the multilingual one."""
         return self.whisper_model_en if (lang or "en").lower().split("-")[0] == "en" else self.whisper_model_multi
