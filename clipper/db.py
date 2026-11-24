@@ -57,6 +57,8 @@ EXTRA_COLUMNS = {
     "reviewed_at": "TEXT",
     "posted_at": "TEXT",
     "updated_at": "TEXT",
+    "exported_at": "TEXT",        # when `export` last packaged it (status stays 'approved' until you post it)
+    "export_path": "TEXT",        # the exported .mp4
 }
 
 
@@ -304,3 +306,22 @@ def _sync_analysis_json(clip: dict, title: str, description: str, tags: list[str
         p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except (OSError, ValueError):
         pass
+
+
+# ------------------------------------------------------------------ export
+def clips_to_export(db_path: Path, include_exported: bool = False, ids: list[int] | None = None) -> list[dict]:
+    """Approved clips not exported yet (oldest first); all approved with include_exported; or exactly `ids`."""
+    with connect(db_path) as conn:
+        if ids:
+            marks = ",".join("?" * len(ids))
+            rows = conn.execute(f"SELECT * FROM clips WHERE id IN ({marks}) ORDER BY id", ids).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM clips WHERE status = 'approved'"
+                                + ("" if include_exported else " AND exported_at IS NULL") + " ORDER BY id").fetchall()
+    return [row_to_dict(r) for r in rows]
+
+
+def mark_exported(db_path: Path, clip_id: int, export_path: Path) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET exported_at = datetime('now'), export_path = ?, updated_at = datetime('now')"
+                     " WHERE id = ?", (str(export_path), clip_id))

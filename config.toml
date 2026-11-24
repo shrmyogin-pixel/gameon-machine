@@ -12,6 +12,7 @@ data_dir = "data"
 database = "data/clips.sqlite"
 log_file = "data/logs/clipper.log"
 clips_dir = "data/clips"
+exports_dir = "data/exports"   # `export` puts upload packages here, one folder per day
 sessions_dir = "data/sessions"
 
 [recorder]

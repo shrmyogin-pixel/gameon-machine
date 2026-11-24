@@ -41,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("status", help="queue counts, sessions, disk usage and recent errors")
     st.add_argument("--watch", type=float, nargs="?", const=5.0, metavar="SECONDS",
                     help="refresh continuously (default every 5 seconds)")
+    ex = sub.add_parser("export", help="package approved clips (mp4 + thumbnail + upload sheet) for manual upload")
+    ex.add_argument("--all", action="store_true", help="re-export every approved clip, even ones exported before")
+    ex.add_argument("--id", type=int, action="append", metavar="ID", help="export this clip id (repeatable; re-exports)")
+    ex.add_argument("--dry-run", action="store_true", help="show what would be exported, copy nothing")
     rv = sub.add_parser("review", help="start the local review dashboard (http://127.0.0.1:8765, localhost only)")
     rv.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
     rv.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
@@ -139,6 +143,27 @@ def main(argv: list[str] | None = None) -> int:
             from .status import run_status
 
             return run_status(cfg, args.watch)
+        if args.command == "export":
+            from .export import run_export
+
+            try:
+                sys.stdout.reconfigure(errors="replace")
+            except Exception:
+                pass
+            res = run_export(cfg, args.all, args.id, args.dry_run)
+            verb = "Would export" if args.dry_run else "Exported"
+            for clip, mp4 in res.exported:
+                print(f"  {verb}: #{clip['id']} {clip['handle']} -> {mp4}")
+            for clip, why in res.refused:
+                print(f"  REFUSED: #{clip['id']} {clip.get('folder', '')}: {why}")
+            if not res.exported and not res.refused:
+                print("Nothing to export: no approved clips waiting (approve some in `python -m clipper review`,"
+                      " or use --all / --id to re-export).")
+            else:
+                print(f"{len(res.exported)} {'would be exported' if args.dry_run else 'exported'}, {len(res.refused)} refused."
+                      + (f"  Folder: {mp4.parent}" if res.exported else ""))
+                print("Nothing was uploaded: post these by hand, then press 'Mark Posted' in the review dashboard.")
+            return 0 if res.ok else 1
         if args.command == "review":
             from .review import run_review
 

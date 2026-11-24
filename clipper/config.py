@@ -37,6 +37,11 @@ class Config:
     claude: str
 
     @property
+    def exports_dir(self) -> Path:
+        """Where `export` writes upload packages (data/exports by default)."""
+        return expand_path(self.raw.get("paths", {}).get("exports_dir", "data/exports"))
+
+    @property
     def streams(self) -> list[dict]:
         return self.raw.get("streams", [])
 
