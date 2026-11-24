@@ -23,3 +23,15 @@ def init_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.executescript(SCHEMA)
+
+
+def add_clip(db_path: Path, platform: str, handle: str, folder: str) -> None:
+    init_db(db_path)
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        conn.execute("INSERT OR IGNORE INTO clips (platform, handle, folder) VALUES (?, ?, ?)",
+                     (platform, handle, folder))
+
+
+def set_clip_status(db_path: Path, folder: str, status: str, error: str | None = None) -> None:
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        conn.execute("UPDATE clips SET status = ?, error = ? WHERE folder = ?", (status, error, folder))

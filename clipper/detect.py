@@ -390,11 +390,12 @@ class SpikeMonitor(threading.Thread):
 
     def __init__(self, session_dir: Path, name: str, params: dict, ffmpeg: str, started: float,
                  stop: threading.Event, chat_alive: Callable[[], bool], segment_seconds: float = 10,
-                 low_priority: bool = True):
+                 low_priority: bool = True, on_moment: Callable[[Moment], None] | None = None):
         super().__init__(name=f"detect-{name}", daemon=True)
         self.dir, self.label, self.ffmpeg = session_dir, name, ffmpeg
         self.stop_event, self.chat_alive = stop, chat_alive
         self.low_priority = low_priority
+        self.on_moment = on_moment
         audio_lag = segment_seconds + 3.0 if params["audio_enabled"] else 1.0
         self.det = StreamDetector(name, params, started, has_chat=chat_alive(), audio_lag=audio_lag)
         self.tail = _ChatTail(session_dir / "chat.jsonl")
@@ -455,6 +456,11 @@ class SpikeMonitor(threading.Thread):
                 f.write(m.to_json() + "\n")
         except OSError as exc:
             log.warning("[%s] could not write moments.jsonl: %s", self.label, exc)
+        if self.on_moment:
+            try:
+                self.on_moment(m)
+            except Exception:
+                log.exception("[%s] moment handler failed; detection continues", self.label)
 
 
 # ---------------------------------------------------------------- replay a saved session

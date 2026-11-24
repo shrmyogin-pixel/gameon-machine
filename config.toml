@@ -42,6 +42,9 @@ max_seconds = 40
 script_min_words = 80
 script_max_words = 110
 hook_max_words = 12
+context_before = 75         # seconds of footage kept before a spike
+context_after = 45          # seconds kept after it (the worker waits this long first)
+workers = 2                 # clipper workers running at the same time (whisper is heavy)
 
 # ---- Posting slots (Melbourne time, AEDT = UTC+11) ----
 [[slots]]

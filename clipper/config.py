@@ -59,6 +59,16 @@ class Config:
         }
         return {**defaults, **self.raw.get("recorder", {})}
 
+    @property
+    def clip(self) -> dict:
+        defaults = {"context_before": 75, "context_after": 45, "workers": 2,
+                    "min_seconds": 30, "max_seconds": 40}
+        return {**defaults, **self.raw.get("clip", {})}
+
+    def whisper_model_for(self, lang: str) -> Path:
+        """English streams use the faster English-only model; everything else the multilingual one."""
+        return self.whisper_model_en if (lang or "en").lower().split("-")[0] == "en" else self.whisper_model_multi
+
 
 def load_config(path: Path = CONFIG_FILE) -> Config:
     with path.open("rb") as f:

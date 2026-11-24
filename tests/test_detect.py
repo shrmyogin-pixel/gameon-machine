@@ -232,8 +232,9 @@ class MonitorThread(unittest.TestCase):
                 msg(started + 30 * 5 + 1, f"fan{i}", "LOL pog")
             (tmp / "chat.jsonl").write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
             stop = threading.Event()
+            handed = []
             mon = SpikeMonitor(tmp, "twitch-test", build_params({}), "ffmpeg", started, stop,
-                               chat_alive=lambda: True)
+                               chat_alive=lambda: True, on_moment=handed.append)
             mon.start()
             time.sleep(1.5)
             stop.set()
@@ -243,6 +244,7 @@ class MonitorThread(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["kind"], "chat")
             self.assertEqual(rows[0]["numbers"]["count"], 25)
+            self.assertEqual([m.numbers["count"] for m in handed], [25])   # handed on to the clipper worker
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

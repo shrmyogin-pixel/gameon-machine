@@ -26,6 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("detect-replay", help="run spike detection over a saved session folder (tuning/testing)")
     r.add_argument("session", help="session folder, e.g. data/sessions/twitch-lacy/20260101-120000")
     r.add_argument("--no-audio", action="store_true", help="chat only (skip decoding audio)")
+    c = sub.add_parser("test-cut", help="run whisper-cli and make frames.jpg for any video file (no live stream needed)")
+    c.add_argument("video", help="path to any .mp4")
+    c.add_argument("--lang", default="en", help="language code: en uses the English model, others the multilingual one (default en)")
     args = parser.parse_args(argv)
 
     try:
@@ -72,6 +75,18 @@ def main(argv: list[str] | None = None) -> int:
             console.setFormatter(logging.Formatter("  ! %(message)s"))
             log.addHandler(console)
             return run_test_chat(args.link, args.seconds, cfg.sessions_dir)
+        if args.command == "test-cut":
+            from pathlib import Path
+
+            from .worker import ClipError, test_cut
+
+            try:
+                folder = test_cut(cfg, Path(args.video).expanduser(), args.lang)
+            except ClipError as exc:
+                print(f"test-cut failed: {exc}")
+                return 1
+            print(f"Done. Files in {folder}")
+            return 0
         if args.command == "detect-replay":
             from pathlib import Path
 

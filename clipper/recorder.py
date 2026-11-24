@@ -34,12 +34,13 @@ def _flags(low_priority: bool) -> int:
 
 
 class Recorder(threading.Thread):
-    def __init__(self, stream: dict, cfg: Config, stop: threading.Event):
+    def __init__(self, stream: dict, cfg: Config, stop: threading.Event, clip_pool=None):
         self.name_ = stream_name(stream)
         super().__init__(name=f"rec-{self.name_}", daemon=True)
         self.stream = stream
         self.cfg = cfg
         self.stop_event = stop
+        self.clip_pool = clip_pool
         self.opts = cfg.recorder
         self.stream_dir = cfg.sessions_dir / self.name_
         self.active_dir: Path | None = None
@@ -169,7 +170,10 @@ class Recorder(threading.Thread):
             mon = SpikeMonitor(session_dir, self.name_, params, self.ffmpeg_exe, started.timestamp(), stop,
                                chat_alive=lambda: chat is not None and chat.is_alive(),
                                segment_seconds=self.opts["segment_seconds"],
-                               low_priority=self.cfg.raw["encoding"].get("below_normal_priority", True))
+                               low_priority=self.cfg.raw["encoding"].get("below_normal_priority", True),
+                               on_moment=(lambda m: self.clip_pool.submit(
+                                   self.stream, session_dir, m, self.opts["segment_seconds"]))
+                               if self.clip_pool else None)
             mon.start()
             return mon, stop
         except Exception:
@@ -243,8 +247,11 @@ def watch(cfg: Config, streams: list[dict], seconds: float | None = None) -> int
     if not streams:
         print("No streams to watch. Add [[streams]] entries to config.toml.")
         return 1
+    from .worker import ClipperPool
+
     stop = threading.Event()
-    recorders = [Recorder(s, cfg, stop) for s in streams]
+    pool = ClipperPool(cfg)
+    recorders = [Recorder(s, cfg, stop, pool) for s in streams]
     print(f"Watching {len(recorders)} stream(s). Press Ctrl+C to stop.")
     for r in recorders:
         r.start()
@@ -260,5 +267,7 @@ def watch(cfg: Config, streams: list[dict], seconds: float | None = None) -> int
     stop.set()
     for r in recorders:
         r.join(timeout=45)
+    print("Finishing any clips in progress...")
+    pool.close()
     print("Stopped cleanly.")
     return 0
