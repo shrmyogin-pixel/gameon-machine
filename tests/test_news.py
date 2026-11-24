@@ -503,7 +503,7 @@ class MakeShortTests(unittest.TestCase):
         import re
         plain = re.sub(r"\{[^}]*\}", "", ass)                                           # text without override tags
         self.assertIn("GTA 6 OFFICIALLY HITS PLAYSTATION RECORDS", plain)
-        self.assertIn("{\\c&H0000D7FF&}6{", ass)                                        # the number is the accent word
+        self.assertIn("{\\c&H0000F2FF&}6{", ass)                                        # the number is the accent word
         self.assertIn("\\fscx72", ass)                                                  # pop-in animation on the captions
         self.assertIn("xfade", Path(news_render.__file__).read_text(encoding="utf-8"))
         self.assertIn("Source: IGN", ass)

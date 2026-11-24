@@ -200,8 +200,8 @@ def caption_groups(words: list, start: float, end: float, per: int = WORDS_PER_C
     return out
 
 
-HOOK_COLOUR = "&H0000F0FF&"
-ACCENT = "&H0000D7FF&"          # ASS colour (BGR): warm yellow-gold for the key word
+HOOK_COLOUR = "&H00FFFFFF&"
+ACCENT = "&H0000F2FF&"          # ASS colour (BGR): neon yellow for the key word
 ACCENT_WORDS = {"FREE", "LEAK", "LEAKED", "NEW", "BREAKING", "DELAYED", "CONFIRMED", "REVEALED", "BANNED", "EXCLUSIVE",
                 "RELEASE", "DLC", "UPDATE", "WIN", "WINS", "FINALLY", "SECRET", "HUGE", "INSANE", "OFFICIAL"}
 

@@ -18,7 +18,7 @@ from pathlib import Path
 from .config import Config
 from .hookscore import words_of
 from .profanity import mask
-from .render import (ACCENT, CAPTION_Y, HOOK_COLOUR, HOOK_Y, accent_text, pop_tags, ENCODER_ARGS, FONT_DIRS, H, SAFE_BOTTOM, W, RenderError, _ass_text, _ass_time,
+from .render import (ACCENT, CAPTION_Y, accent_text, pop_tags, ENCODER_ARGS, FONT_DIRS, H, SAFE_BOTTOM, W, RenderError, _ass_text, _ass_time,
                      _ffmpeg, _fp, _slot, audio_chain, caption_fonts, caption_groups, pick_encoder, watermark_parts)
 
 log = logging.getLogger("clipper")
@@ -27,6 +27,8 @@ TAIL_SECONDS = 0.5             # picture stays up a moment after the voice ends
 FPS = 30
 PICTURE_TIMEOUT = 600          # a picture render that takes longer than this is stuck: fall back to the gradient
 KB_ZOOM = 0.14                 # Ken Burns: zoom grows from 1.00x to 1.14x within a cut (subtle)
+CYAN, MAGENTA, YELLOW, WHITE, NAVY = "&H00FFF000&", "&H00D62BFF&", "&H0000F2FF&", "&H00FFFFFF&", "&H00300A14&"   # Tokyo Neon (BGR)
+KICKER_Y, NEWS_HOOK_Y = 150, 235      # kicker chip then the big hook, both below the Shorts top bar
 CUT_SECONDS = 4.5              # a cut about every 4-5 s
 XFADE = 0.4                    # seconds each transition overlaps the next picture
 TRANSITIONS = ["fade", "slideleft", "circleopen", "wipeleft", "smoothleft", "zoomin", "fadeblack", "slideup"]
@@ -37,9 +39,8 @@ def build_news_ass(info: dict, words: list, dur: float) -> str:
     f = caption_fonts("en")
     hook = _ass_text(mask(info["hook"]).upper())
     n = len(words_of(hook))
-    hook_size = 84 if n <= 5 else 72 if n <= 8 else 62
+    hook_size = 118 if n <= 5 else 104 if n <= 8 else 90
     kicker = {"free_offer": "FREE GAME OFFER"}.get(info.get("kind"), "BREAKING NEWS")
-    headline = _ass_text(mask(info["headline"]))
     source = _ass_text(mask(f"Source: {info['outlet']}"))
     total = dur + TAIL_SECONDS
     header = f"""[Script Info]
@@ -51,20 +52,22 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,Impact,{hook_size},&H0000F0FF,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,1,0,1,9,5,8,90,90,0,1
-Style: Cap,Impact,{f['cap_size']},&H00FFFFFF,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,1,0,1,9,5,5,90,90,0,1
-Style: Kicker,{f['head']},44,&H0000D7FF,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,4,0,1,6,3,8,90,90,0,1
-Style: Head,{f['head']},56,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,7,4,8,90,90,0,1
-Style: Src,{f['head']},36,&H00E0E0E0,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,5,3,8,90,90,0,1
+Style: Hook,Impact,{hook_size},{WHITE},&H000000FF,{CYAN},{MAGENTA},0,0,0,0,100,100,2,0,1,8,6,8,90,90,0,1
+Style: Glow,Impact,{hook_size},{CYAN},&H000000FF,{MAGENTA},&H00000000,0,0,0,0,100,100,2,0,1,16,0,8,90,90,0,1
+Style: Cap,Impact,{f['cap_size']},{WHITE},&H000000FF,{NAVY},{MAGENTA},0,0,0,0,100,100,1,0,1,9,6,5,90,90,0,1
+Style: Kicker,{f['head']},46,{NAVY},&H000000FF,{YELLOW},{MAGENTA},0,0,0,0,100,100,5,0,1,12,4,8,90,90,0,1
+Style: Src,{f['head']},34,&H00F0F0F0,&H000000FF,{NAVY},&H96000000,0,0,0,0,100,100,0,0,1,5,3,8,90,90,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     t0, t1 = _ass_time(0), _ass_time(total)
-    lines = [f"Dialogue: 2,{t0},{t1},Hook,,0,0,0,,{{\\an8\\pos({W // 2},{HOOK_Y}){pop_tags(260)}}}{accent_text(hook, ACCENT, HOOK_COLOUR)}",
-             f"Dialogue: 0,{t0},{t1},Kicker,,0,0,0,,{{\\an8\\pos({W // 2},590){pop_tags(240, 60, 110)}}}{kicker}",
-             f"Dialogue: 0,{t0},{t1},Head,,0,0,0,,{{\\an8\\pos({W // 2},660){pop_tags(300, 85, 104)}}}{accent_text(headline, ACCENT, "&H00FFFFFF&")}",
-             f"Dialogue: 0,{t0},{t1},Src,,0,0,0,,{{\\an8\\pos({W // 2},1330)}}{source}"]
+    def ev(layer: int, style: str, x: int, y: int, tags: str, text: str, an: int = 8) -> str:
+        return f"Dialogue: {layer},{t0},{t1},{style},,0,0,0,,{{\\an{an}\\pos({x},{y}){tags}}}{text}"
+    lines = [ev(1, "Glow", W // 2, NEWS_HOOK_Y, "\\blur10" + pop_tags(260), hook),            # neon glow under the hook
+             ev(2, "Hook", W // 2, NEWS_HOOK_Y, "\\blur1" + pop_tags(260), accent_text(hook, ACCENT, WHITE)),
+             ev(3, "Kicker", W // 2, KICKER_Y, pop_tags(240, 60, 110), kicker),
+             ev(0, "Src", W // 2, 1330, "", source)]
     for a, b, text in caption_groups(words, 0.0, dur + 0.05):
         lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Cap,,0,0,0,,{{\\an5\\pos({W // 2},{CAPTION_Y}){pop_tags()}}}{accent_text(text)}")
     return header + "\n".join(lines) + "\n"
@@ -82,8 +85,8 @@ def scrim_png(path: Path) -> Path:
     import cv2
     import numpy as np
     ys = np.linspace(0.0, 1.0, H)
-    pts_y = [0.0, 0.10, 0.20, 0.30, 0.50, 0.62, 0.75, 1.0]           # fractions of the frame height
-    pts_a = [0.62, 0.55, 0.45, 0.58, 0.60, 0.62, 0.60, 0.70]          # opacity of the black layer there
+    pts_y = [0.0, 0.07, 0.20, 0.30, 0.40, 0.55, 0.60, 0.72, 1.0]     # fractions of the frame height
+    pts_a = [0.62, 0.55, 0.30, 0.05, 0.0, 0.0, 0.10, 0.50, 0.60]      # dark only behind the hook and the captions
     alpha = np.interp(ys, pts_y, pts_a)
     img = np.zeros((H, W, 4), np.uint8)
     img[..., 3] = (alpha[:, None] * 255).astype(np.uint8)
@@ -100,6 +103,18 @@ def plan_segments(total: float, n_visuals: int, target: float = CUT_SECONDS) -> 
     return [(idx, seg) for idx in order]
 
 
+def lift_dark(img):
+    """Gamma-lift a dark / muted picture so it stays vibrant under the lighter scrim (bright pictures are left alone)."""
+    import cv2
+    import numpy as np
+    mean = float(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).mean())
+    if mean >= 105:
+        return img
+    gamma = max(0.6, 0.6 + 0.4 * (mean / 105))                        # darker -> stronger lift (0.6 .. 1.0)
+    lut = (np.linspace(0, 1, 256) ** gamma * 255).astype(np.uint8)
+    return cv2.LUT(img, lut)
+
+
 def prep_visual(src: Path, dst: Path, anchor: float) -> Path:
     """Cover-crop a picture to 9:16 (1620x2880, 1.5x the frame so the zoom stays sharp); `anchor` 0..1 picks which
     part of a wide picture is kept (0.5 = centre). Raises RenderError when the picture cannot be decoded."""
@@ -108,6 +123,7 @@ def prep_visual(src: Path, dst: Path, anchor: float) -> Path:
     if img is None or min(img.shape[:2]) < 100:
         raise RenderError(f"{src.name} is not a usable picture")
     h, w = img.shape[:2]
+    img = lift_dark(img)
     scale = max(1620 / w, 2880 / h)
     img = cv2.resize(img, (round(w * scale), round(h * scale)), interpolation=cv2.INTER_CUBIC if scale > 1 else cv2.INTER_AREA)
     h, w = img.shape[:2]
@@ -189,7 +205,7 @@ def _render(cfg: Config, folder: Path, info: dict, words: list, dur: float, visu
                 vis = prep_visual(visuals[vi], folder / f"visual_{i}.jpg", anchors[(seed + i) % len(anchors)])
                 made.append(vis)
                 args += ["-loop", "1", "-framerate", str(FPS), "-t", f"{n / FPS:.3f}", "-i", vis]
-                chains.append(f"[{i}:v]zoompan={motion(seed + i, n)}:d=1:s={W}x{H}:fps={FPS},eq=saturation=0.92,"
+                chains.append(f"[{i}:v]zoompan={motion(seed + i, n)}:d=1:s={W}x{H}:fps={FPS},eq=saturation=1.2:contrast=1.08:brightness=0.02,"
                                f"setsar=1,format=yuv420p[z{i}]")
             args += ["-i", mp3, "-i", scrim]
             voice_idx, scrim_idx, next_idx = k, k + 1, k + 2
