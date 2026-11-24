@@ -72,6 +72,10 @@ class Config:
         return {**defaults, **self.raw.get("ai", {})}
 
     @property
+    def notify(self) -> dict:
+        return {"enabled": True, "min_score": 8.0, "banger": True, **self.raw.get("notify", {})}
+
+    @property
     def render(self) -> dict:
         return {"max_renders": 1, **self.raw.get("render", {})}
 

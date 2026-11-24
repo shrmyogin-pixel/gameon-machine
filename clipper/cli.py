@@ -35,6 +35,12 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("folder", help="clip folder with payload.json, analysis.json and source.mp4")
     rd.add_argument("--layout", choices=["auto", "stack", "blur"], default="auto",
                     help="auto = facecam stack if a face is found in a corner, else blurred background")
+    ru = sub.add_parser("run", help="unattended mode: watch + detect + clip + edit + render, restarting crashed workers")
+    ru.add_argument("--only", help="only run this handle from config.toml (e.g. lacy)")
+    ru.add_argument("--seconds", type=float, help="stop automatically after this many seconds (testing)")
+    st = sub.add_parser("status", help="queue counts, sessions, disk usage and recent errors")
+    st.add_argument("--watch", type=float, nargs="?", const=5.0, metavar="SECONDS",
+                    help="refresh continuously (default every 5 seconds)")
     rv = sub.add_parser("review", help="start the local review dashboard (http://127.0.0.1:8765, localhost only)")
     rv.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
     rv.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
@@ -117,6 +123,22 @@ def main(argv: list[str] | None = None) -> int:
             status = render_clip(cfg, folder, args.layout)
             print(f"Render result: {status}  ({folder / 'clip.mp4'})")
             return 0 if status == "rendered" else 1
+        if args.command == "run":
+            import logging
+
+            from .runner import run
+
+            console = logging.StreamHandler()
+            console.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%H:%M:%S"))
+            log.addHandler(console)
+            streams = cfg.streams
+            if args.only:
+                streams = [s for s in streams if s["handle"].lower() == args.only.lower()]
+            return run(cfg, streams, args.seconds)
+        if args.command == "status":
+            from .status import run_status
+
+            return run_status(cfg, args.watch)
         if args.command == "review":
             from .review import run_review
 

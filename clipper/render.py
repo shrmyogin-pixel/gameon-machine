@@ -408,6 +408,8 @@ def render_clip(cfg: Config, folder: Path, layout: str = "auto") -> str:
         (folder / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
         set_clip_status(cfg.database, name, "rendered")
         record_files(cfg.database, name, folder)
+        from .notify import notify_rendered  # toast for banger / high-score clips; never raises
+        notify_rendered(cfg, name)
         return "rendered"
     except Exception as exc:
         log.error("[%s] render failed: %s", name, exc)

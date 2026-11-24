@@ -57,6 +57,11 @@ retries = 1                 # extra attempts when the reply is not valid JSON / 
 [render]
 max_renders = 1             # video renders running at the same time (1 keeps the PC usable)
 
+[notify]
+enabled = true              # Windows toast when a strong clip finishes rendering (falls back to a console beep + log)
+min_score = 8               # toast when the AI score is at least this ...
+banger = true               # ... or when the AI editor flagged the clip as a banger
+
 # ---- Posting slots (Melbourne time, AEDT = UTC+11) ----
 [[slots]]
 name = "Slot 1 - US Peak"
