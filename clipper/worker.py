@@ -265,7 +265,9 @@ def build_clip(cfg: Config, stream: dict, session_dir: Path, moment, segment_sec
         log.info("[%s] clip ready: %s (%.0fs, %d words, %.0fs of work)", folder.name.rsplit("-", 2)[0],
                  folder.name, duration, len(words), time.monotonic() - t0)
         from .editor import edit_clip  # AI editor step; never raises
-        edit_clip(cfg, folder)
+        if edit_clip(cfg, folder) == "edited":
+            from .render import render_clip  # never raises; waits for a free render slot
+            render_clip(cfg, folder)
         return folder
     except Exception as exc:
         log.exception("clip failed for %s at +%.0fs", stream.get("handle"), getattr(moment, "offset", 0))

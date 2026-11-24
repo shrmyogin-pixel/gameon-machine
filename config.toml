@@ -50,9 +50,12 @@ workers = 2                 # clipper workers running at the same time (whisper 
 model = "sonnet"            # headless Claude editor (claude -p --model ...)
 min_score = 6               # normal mode: clips scoring below this are skipped
 launch_mode = true          # channel-launch mode: use launch_min_score instead, so more clips get through
-launch_min_score = 5
+launch_min_score = 4
 timeout_seconds = 240       # per Claude call
 retries = 1                 # extra attempts when the reply is not valid JSON / exit code != 0
+
+[render]
+max_renders = 1             # video renders running at the same time (1 keeps the PC usable)
 
 # ---- Posting slots (Melbourne time, AEDT = UTC+11) ----
 [[slots]]

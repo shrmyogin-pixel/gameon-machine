@@ -67,9 +67,13 @@ class Config:
 
     @property
     def ai(self) -> dict:
-        defaults = {"model": "sonnet", "min_score": 6, "launch_mode": True, "launch_min_score": 5,
+        defaults = {"model": "sonnet", "min_score": 6, "launch_mode": True, "launch_min_score": 4,
                     "timeout_seconds": 240, "retries": 1}
         return {**defaults, **self.raw.get("ai", {})}
+
+    @property
+    def render(self) -> dict:
+        return {"max_renders": 1, **self.raw.get("render", {})}
 
     def whisper_model_for(self, lang: str) -> Path:
         """English streams use the faster English-only model; everything else the multilingual one."""

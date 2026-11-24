@@ -31,6 +31,10 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--lang", default="en", help="language code: en uses the English model, others the multilingual one (default en)")
     e = sub.add_parser("edit", help="run the Claude AI editor on an existing clip folder (needs payload.json + frames.jpg)")
     e.add_argument("folder", help="clip folder, e.g. data/clips/twitch-lacy-20260101-120000")
+    rd = sub.add_parser("render", help="render clip.mp4 + thumb.jpg for a clip folder that the editor approved")
+    rd.add_argument("folder", help="clip folder with payload.json, analysis.json and source.mp4")
+    rd.add_argument("--layout", choices=["auto", "stack", "blur"], default="auto",
+                    help="auto = facecam stack if a face is found in a corner, else blurred background")
     args = parser.parse_args(argv)
 
     try:
@@ -101,6 +105,15 @@ def main(argv: list[str] | None = None) -> int:
             status = edit_clip(cfg, folder)
             print(f"Editor result: {status}  ({folder / 'analysis.json'})")
             return 0 if status != "failed" else 1
+        if args.command == "render":
+            from pathlib import Path
+
+            from .render import render_clip
+
+            folder = Path(args.folder).expanduser().resolve()
+            status = render_clip(cfg, folder, args.layout)
+            print(f"Render result: {status}  ({folder / 'clip.mp4'})")
+            return 0 if status == "rendered" else 1
         if args.command == "detect-replay":
             from pathlib import Path
 
