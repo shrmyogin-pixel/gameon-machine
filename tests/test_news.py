@@ -527,7 +527,8 @@ class MakeShortTests(unittest.TestCase):
         self.assertIn("\\fscx72", ass)                                                  # pop-in animation on the captions
         self.assertIn("xfade", Path(news_render.__file__).read_text(encoding="utf-8"))
         self.assertIn("Source: IGN", ass)
-        self.assertIn("THIS IS S***", ass)                                              # captions: 3 words, masked
+        self.assertIn("S*** SO", plain)                                                 # captions: 2-3 words per line, masked
+        self.assertIn(r"{\c&H00FFF000&\fscx80", ass)                                    # the spoken word: cyan + pop
         self.assertIn(f"\\pos(540,{news_render.CAPTION_Y})", ass)
         self.assertLess(news_render.CAPTION_Y, news_render.SAFE_BOTTOM)
         self.assertIn("Style: Cap,Impact,100", ass)

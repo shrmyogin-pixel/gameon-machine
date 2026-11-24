@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import subprocess
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -36,17 +38,43 @@ MAX_BODY = 64 * 1024
 CHUNK = 256 * 1024
 
 
-def clip_view(clip: dict, clips_dir: Path) -> dict:
+def clip_view(clip: dict, cfg: Config) -> dict:
     """What the browser gets for one clip: the row plus media urls and the editable/locked description."""
     out = {k: v for k, v in clip.items() if k not in ("clip_path", "thumb_path", "frames_path", "analysis_path")}
-    folder = clips_dir / clip["folder"]
+    folder = cfg.clips_dir / clip["folder"]
     out["video_url"] = f"/media/{clip['id']}/clip.mp4" if (folder / "clip.mp4").is_file() else None
     out["thumb_url"] = f"/media/{clip['id']}/thumb.jpg" if (folder / "thumb.jpg").is_file() else None
     out["description_body"], out["credit"] = db.split_description(clip)
     out["can_review"] = clip["status"] in db.REVIEW_STATUSES
     out["can_route"] = clip["status"] in ("rendered", "approved")
     out["files_deleted"] = bool(clip.get("files_deleted_at"))
+    local = None if out["files_deleted"] else clip_local_path(clip, cfg)
+    out["local_path"] = str(local) if local else None
     return out
+
+
+def clip_local_path(clip: dict, cfg: Config) -> Path | None:
+    """The file to show in Explorer: the exported .mp4 when there is one (inside exports_dir), else the clip's own clip.mp4,
+    else its folder. Always derived from the database row and the configured directories, never from the browser.
+    None when the files are gone (Reject / Mark Uploaded delete them)."""
+    export = clip.get("export_path")
+    if export:
+        p = Path(export)
+        if p.is_file() and cfg.exports_dir.resolve() in p.resolve().parents:
+            return p
+    folder = cfg.clips_dir / clip["folder"]
+    for cand in (folder / "clip.mp4", folder):
+        if cand.exists() and cfg.clips_dir.resolve() in cand.resolve().parents:
+            return cand
+    return None
+
+
+def open_in_explorer(path: Path) -> None:
+    """Windows File Explorer with the file selected (a folder is opened as is). Args are a list: no shell involved."""
+    if os.name != "nt":
+        raise OSError("Open Folder needs Windows File Explorer")
+    arg = f"/select,{path}" if path.is_file() else str(path)
+    subprocess.Popen(["explorer", arg])             # explorer exits with 1 even on success: never check its return code
 
 
 def _tri(value: str | None) -> bool | None:
@@ -135,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "unknown sort")
         clips = db.list_clips(self.cfg.database, status, one("streamer"), _tri(one("banger")),
                               _tri(one("sensitive")), sort)
-        self._json(200, {"clips": [clip_view(c, self.cfg.clips_dir) for c in clips],
+        self._json(200, {"clips": [clip_view(c, self.cfg) for c in clips],
                          "counts": db.status_counts(self.cfg.database),
                          "streamers": db.streamers(self.cfg.database),
                          "slots": [{"name": s["name"], "time": s["time"]} for s in self.cfg.slots],
@@ -198,13 +226,27 @@ class Handler(BaseHTTPRequestHandler):
         log.info("[%s] review: slot=%s target=%s", clip["folder"], slot, target)
         return db.get_clip(self.cfg.database, clip_id)
 
+    def _open(self, clip_id: int) -> None:
+        clip = db.get_clip(self.cfg.database, clip_id)
+        if not clip:
+            return self._error(404, "not found")
+        path = None if clip.get("files_deleted_at") else clip_local_path(clip, self.cfg)
+        if path is None:
+            return self._error(404, "this clip's files are gone (rejected or uploaded clips are deleted)")
+        try:
+            open_in_explorer(path)
+        except OSError as exc:
+            return self._error(500, str(exc))
+        log.info("[%s] review: opened in Explorer: %s", clip["folder"], path)
+        self._json(200, {"opened": str(path)})
+
     def do_POST(self):
         try:
             if not self._host_ok() or not self._origin_ok():
                 return self._error(HTTPStatus.FORBIDDEN, "request not allowed")
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
                 return self._error(415, "send application/json")
-            m = re.fullmatch(r"/api/clips/(\d+)/(status|edit|route)", urlsplit(self.path).path)
+            m = re.fullmatch(r"/api/clips/(\d+)/(status|edit|route|open)", urlsplit(self.path).path)
             if not m:
                 return self._error(404, "not found")
             length = int(self.headers.get("Content-Length") or 0)
@@ -218,13 +260,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(400, "body must be a JSON object")
             clip_id = int(m.group(1))
             try:
+                if m.group(2) == "open":
+                    return self._open(clip_id)
                 if m.group(2) == "status":
                     clip = db.review_action(self.cfg.database, clip_id, str(body.get("action", "")))
                     log.info("[%s] review: %s -> %s", clip["folder"], body.get("action"), clip["status"])
                     if clip["status"] in ("rejected", "posted"):          # reject / mark uploaded: files go now
                         outcome = discard(self.cfg, clip, "rejected" if clip["status"] == "rejected" else "uploaded")
                         clip = db.get_clip(self.cfg.database, clip_id)
-                        return self._json(200, {"clip": clip_view(clip, self.cfg.clips_dir),
+                        return self._json(200, {"clip": clip_view(clip, self.cfg),
                                                 "counts": db.status_counts(self.cfg.database), **outcome})
                 elif m.group(2) == "route":
                     clip = self._route(clip_id, body)
@@ -233,7 +277,7 @@ class Handler(BaseHTTPRequestHandler):
                                              body.get("description", ""), body.get("tags", []))
             except db.ReviewError as exc:
                 return self._error(exc.http, str(exc))
-            self._json(200, {"clip": clip_view(clip, self.cfg.clips_dir),
+            self._json(200, {"clip": clip_view(clip, self.cfg),
                              "counts": db.status_counts(self.cfg.database)})
         except (ConnectionError, TimeoutError):
             pass

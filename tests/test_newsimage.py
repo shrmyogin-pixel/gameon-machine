@@ -320,14 +320,14 @@ class PictureRenderTests(unittest.TestCase):
                         "-frames:v", "1", str(out)], check=True)
         return cv2.imread(str(out)).astype(int)
 
-    def test_segments_cut_every_three_and_a_half_to_five_seconds_and_cycle_the_visuals(self):
+    def test_segments_cut_every_two_and_a_half_to_four_and_a_half_seconds_and_cycle_the_visuals(self):
         for total in (30.5, 33.0, 35.8, 40.0):
             segs = news_render.plan_segments(total, 4)
             self.assertAlmostEqual(sum(s for _, s in segs), total, places=6)
-            self.assertTrue(all(3.5 <= s <= 5.0 for _, s in segs), (total, segs))
+            self.assertTrue(all(2.5 <= s <= 4.5 for _, s in segs), (total, segs))
             self.assertTrue(all(a[0] != b[0] for a, b in zip(segs, segs[1:])))       # never the same picture twice in a row
         self.assertEqual({i for i, _ in news_render.plan_segments(33.0, 3)}, {0, 1, 2})
-        self.assertEqual(len(news_render.plan_segments(33.0, 1)), 8)                  # a single picture still gets motion cuts
+        self.assertEqual(len(news_render.plan_segments(33.0, 1)), 10)                  # a single picture still gets motion cuts
 
     def test_motions_are_varied(self):
         self.assertEqual(len({news_render.motion(k, 150) for k in range(5)}), 5)
@@ -335,7 +335,7 @@ class PictureRenderTests(unittest.TestCase):
     def test_multi_picture_short_cuts_between_visuals_with_music(self):
         dur, words = self.voice(long=True)
         r = news_render.render_news_video(self.cfg, self.folder, {**self.info, "images": self.pics(3), "music": self.track}, words, dur)
-        self.assertEqual((r["background"], r["visuals"], r["cuts"]), ("picture", 3, 4))
+        self.assertEqual((r["background"], r["visuals"], r["cuts"]), ("picture", 3, 5))
         self.assertEqual(self.probe(self.folder / "clip.mp4"), "h264,1080,1920,30/1")
         self.assertEqual(r["music"]["title"], "Test Track")
         self.assertEqual(r["music"]["attribution"], ATTRIBUTION)

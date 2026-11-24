@@ -88,7 +88,7 @@ corner = "left"                    # "left" or "right"; bottom, above the y=1450
 hours = 12                         # only stories newer than this
 stories = 4                        # news Shorts per run (repeat stories are skipped: same URL, same headline, same event)
 images_min = 4                     # fewer unique real pictures than this -> topped up with topic-matched game screenshots
-images_max = 6                     # 4-6 real pictures per Short, cut every 3.5-5 s (never generated cards or text slides)
+images_max = 6                     # 4-6 real pictures per Short, cut every 2.5-4.5 s (never generated cards or text slides)
 images_floor = 3                   # still fewer than this after the screenshot search -> the story is skipped
 image_timeout = 15                 # seconds per picture / article-page download (each is retried)
 # Article pictures: og:image, twitter:image, <picture>/srcset/data-src and in-article <img> (width >= 600 px, no logos/ads).
@@ -101,7 +101,8 @@ voice = "en-US-AndrewNeural"       # edge-tts voice: neutral and natural (fallba
 rate = "+0%"                       # natural pace; the renderer nudges it only if the voiceover misses 30-40 s
 pitch = "+0Hz"
 groq_model = "whisper-large-v3-turbo"   # word timestamps (GROQ_API_KEY in .env)
-max_candidates = 40                # newest headlines shown to Claude
+max_candidates = 40                # headlines shown to Claude, balanced across the four buckets below (newest first within each)
+bucket_max = 2                     # at most this many Shorts of one bucket per run: streamer / giveaway / achievement / whats_new
 auto_run = true                    # `run` / run.bat also makes news Shorts at the times below
 run_times = ["07:30", "13:30", "19:30"]   # local (Melbourne) time
 
@@ -284,3 +285,24 @@ url = "https://esports.gg/feed/"
 [[news.feeds]]
 name = "Dexerto"
 url = "https://www.dexerto.com/feed/"
+
+# ---- Streamer / creator, giveaway, achievement and "what's new" coverage (the four buckets in clipper/buckets.py; Dot Esports and Twitch Blog block feed readers, so Dexerto / Esports.gg / GameRant cover streamers) ----
+[[news.feeds]]
+name = "GamesRadar"
+url = "https://www.gamesradar.com/rss/"
+
+[[news.feeds]]
+name = "GameRant"
+url = "https://gamerant.com/feed/"
+
+[[news.feeds]]
+name = "TheGamer"
+url = "https://www.thegamer.com/feed/"
+
+[[news.feeds]]
+name = "Insider Gaming"
+url = "https://insider-gaming.com/feed/"
+
+[[news.feeds]]
+name = "Destructoid"
+url = "https://www.destructoid.com/feed/"

@@ -240,6 +240,81 @@ def pop_tags(ms: int = 220, start_pct: int = 72, peak_pct: int = 112, fade_ms: i
             % (fade_ms, start_pct, start_pct, a, peak_pct, peak_pct, a, ms))
 
 
+# ---- word-by-word pop captions: 2-3 words per line, the spoken word lights up and pops ----
+CAP_WHITE = "&H00FFFFFF&"
+CAP_CYAN = "&H00FFF000&"             # electric cyan (BGR): the word being spoken
+CAP_YELLOW = "&H0000F2FF&"           # neon yellow: the spoken word when it is a number / price / news trigger word
+CAP_LINE_H = 1.25                    # line height as a multiple of the font size
+SENTENCE_END = re.compile(r"[.!?…][\"')\]]*$")
+
+
+def _balanced_chunks(n: int, per: int) -> list[int]:
+    """Sizes of the lines for a run of n words, at most `per` each and as even as possible (7 -> 3,2,2; 4 -> 2,2)."""
+    k = -(-n // per)
+    base, extra = divmod(n, k)
+    return [base + (1 if i < extra else 0) for i in range(k)]
+
+
+def _split_run(run: list, per: int) -> list[list]:
+    out, i = [], 0
+    for size in (_balanced_chunks(len(run), per) if run else []):
+        out.append(run[i:i + size])
+        i += size
+    return out
+
+
+def word_lines(words: list, start: float, end: float, per: int = 3) -> list[list[tuple[float, float, str]]]:
+    """Caption lines of 2-3 (sometimes 1) words from word timestamps [[from_s, to_s, word], ...], times relative to
+    `start`. A line never runs across a sentence end. Profanity is masked. Each word keeps its own start / end."""
+    inside = [(a - start, b - start, mask(str(w)).strip()) for a, b, w in words
+              if a >= start - 0.05 and a < end and str(w).strip()]
+    lines, run = [], []
+    for item in inside:
+        run.append(item)
+        if SENTENCE_END.search(item[2]):
+            lines += _split_run(run, per)
+            run = []
+    lines += _split_run(run, per)
+    return lines
+
+
+def pop_caption_events(words: list, start: float, end: float, lang: str = "en", y: int = CAPTION_Y, per: int = 3,
+                       layer: int = 1, size: int | None = None, style: str = "Cap") -> list[str]:
+    """ASS Dialogue lines: for every spoken word one event that shows its whole line with THAT word in electric cyan
+    (neon yellow for numbers / trigger words) and a quick pop (80% -> 118% -> 100%); the line fades in on its first word.
+    Centred on y (default 1180); a two-line caption of this font size is kept above the y=1450 safe-zone limit.
+    Devanagari (lang 'hi') is case-less and uses the Nirmala UI / Mangal font set by caption_fonts()."""
+    size = size or caption_fonts(lang)["cap_size"]
+    if y + size * CAP_LINE_H * 1.1 > SAFE_BOTTOM:
+        y = int(SAFE_BOTTOM - size * CAP_LINE_H * 1.1)
+    horizon = end - start
+    lines = word_lines(words, start, end, per)
+    events = []
+    for li, line in enumerate(lines):
+        texts = [_ass_text(w.upper()) for _, _, w in line]
+        nxt = lines[li + 1][0][0] if li + 1 < len(lines) else None
+        line_end = line[-1][1] + 0.25                              # hold a beat after the last word...
+        if nxt is not None and nxt - line[-1][1] < 0.6:
+            line_end = nxt                                         # ...or until the next line when it follows right away
+        line_end = min(line_end, horizon)
+        for wi, (a, _b, _w) in enumerate(line):
+            t0 = max(a, 0.0)
+            t1 = max(line[wi + 1][0] if wi + 1 < len(line) else line_end, t0 + 0.08)
+            plain = re.sub(r"[^\w]", "", texts[wi])
+            hl = CAP_YELLOW if (any(c.isdigit() for c in plain) or plain in ACCENT_WORDS) else CAP_CYAN
+            parts = []
+            for j, t in enumerate(texts):
+                if j == wi:
+                    parts.append("{\\c%s\\fscx80\\fscy80\\t(0,90,\\fscx118\\fscy118)\\t(90,190,\\fscx100\\fscy100)}%s{\\c%s\\fscx100\\fscy100}"
+                                 % (hl, t, CAP_WHITE))
+                else:
+                    parts.append(t)
+            fad = "\\fad(60,0)" if wi == 0 else ""
+            events.append(f"Dialogue: {layer},{_ass_time(t0)},{_ass_time(t1)},{style},,0,0,0,,"
+                          f"{{\\an5\\pos({W // 2},{y}){fad}}}{' '.join(parts)}")
+    return events
+
+
 def stream_lang(payload: dict) -> str:
     """Language of the stream ('hi' for CarryMinati...), from config via payload.json; whisper's guess as backup."""
     lang = payload.get("stream", {}).get("lang") or payload.get("transcript", {}).get("language") or "en"
@@ -283,8 +358,7 @@ Style: Meme,{f['Meme']},46,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = [f"Dialogue: 2,{_ass_time(0)},{_ass_time(dur)},Hook,,0,0,0,,{{\\an8\\pos({W // 2},{HOOK_Y}){pop_tags(260)}}}{accent_text(hook, ACCENT, HOOK_COLOUR)}"]
-    for a, b, text in caption_groups(words, start, end):
-        lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Cap,,0,0,0,,{{\\an5\\pos({W // 2},{CAPTION_Y}){pop_tags()}}}{accent_text(text)}")
+    lines += pop_caption_events(words, start, end, lang)
     if layout == "blur":  # the free space under the centred 16:9 gameplay, kept above the safe-zone limit
         meme = [_ass_text(mask(m)) for m in analysis.get("meme_caption", [])][:4]
         if meme:

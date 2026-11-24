@@ -22,7 +22,15 @@ BANNED = ("what is up guys", "what's up guys", "hey guys", "welcome back", "you 
           "you wont believe", "let's get into it", "lets get into it", "before we start", "smash that like button",
           "without further ado", "make sure to subscribe", "in today's video", "in todays video", "as you can see",
           "basically", "literally", "stay tuned", "check this out", "get ready", "are you ready", "buckle up",
-          "gamers rejoice")
+          "gamers rejoice", "hey gamers", "hello gamers", "hi gamers", "what's good", "welcome to", "welcome everyone",
+          "breaking news today", "today in gaming", "in this video")
+
+# Slow / generic outros that kill retention: banned as the last line of a script (voice.md "Closing").
+BANNED_CLOSERS = ("thanks for watching", "thank you for watching", "follow for more", "follow game on", "follow us",
+                  "follow for", "see you next time", "see you in the next", "see you soon", "until next time",
+                  "watch this space", "like and subscribe", "hit subscribe", "don't forget to", "dont forget to",
+                  "that's all for", "thats all for", "that's it for", "catch you", "more to come", "stay tuned",
+                  "subscribe")
 
 PLATFORMS = ("playstation", "ps5", "ps4", "ps plus", "xbox", "game pass", "nintendo", "switch", "switch 2", "steam",
              "epic", "epic games", "gog", "pc", "ubisoft", "ea", "battle.net", "riot", "valve", "sony", "microsoft",
@@ -31,7 +39,8 @@ PLATFORMS = ("playstation", "ps5", "ps4", "ps plus", "xbox", "game pass", "ninte
 URGENCY = ("free", "today", "tonight", "now", "just", "breaking", "leak", "leaked", "leaks", "confirmed", "official",
            "officially", "revealed", "reveals", "announced", "announces", "drops", "dropped", "delayed", "cancelled",
            "canceled", "ends", "ending", "expires", "last", "finally", "new", "returns", "surprise", "shadow-drop",
-           "rumour", "rumor", "urgent", "claim", "live", "out")
+           "rumour", "rumor", "urgent", "claim", "live", "out", "stop", "scrolling", "record", "broke", "broken",
+           "nobody", "hours", "ends", "only", "never", "first", "worldwide")
 
 
 @dataclass
@@ -52,6 +61,24 @@ def words_of(text: str) -> list[str]:
 def banned_in(text: str) -> list[str]:
     low = re.sub(r"[’‘]", "'", text.lower())
     return [b for b in BANNED if re.search(r"(?<![a-z])" + re.escape(b) + r"(?![a-z])", low)]
+
+
+def closer_banned(script: str) -> list[str]:
+    """Generic outro phrases in the LAST sentence of a script (the closing line must be a twist / question / loop line)."""
+    sentences = [x for x in re.split(r"(?<=[.!?])\s+", script.strip()) if x.strip()]
+    if not sentences:
+        return []
+    low = re.sub(r"[’‘]", "'", sentences[-1].lower())
+    return [b for b in BANNED_CLOSERS if re.search(r"(?<![a-z])" + re.escape(b) + r"(?![a-z])", low)]
+
+
+def restates_hook(hook: str, body: str, threshold: float = 0.6) -> bool:
+    """True when the script's first sentence just says the hook again (most of the hook's content words repeat)."""
+    def content(text: str) -> set[str]:
+        return {w.lower() for w in words_of(text) if len(w) > 3}
+    first = re.split(r"(?<=[.!?])\s+", body.strip(), maxsplit=1)[0]
+    h = content(hook)
+    return bool(h) and len(h & content(first)) / len(h) >= threshold
 
 
 def _has_phrase(tokens: list[str], phrase: str) -> bool:

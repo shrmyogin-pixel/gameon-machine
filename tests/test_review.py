@@ -35,6 +35,7 @@ class ReviewTests(unittest.TestCase):
         cls.cfg = load_config()
         cls.cfg.database = cls.root / "clips.sqlite"
         cls.cfg.clips_dir = cls.root / "clips"
+        cls.cfg.raw.setdefault("paths", {})["exports_dir"] = str(cls.root / "exports")
         cls.server = review.make_server(cls.cfg, port=0)
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -95,6 +96,41 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(status, 200)
         return data
 
+    def folder_of(self, cid):
+        return db.get_clip(self.cfg.database, cid)["folder"]
+
+    def test_open_folder_selects_the_clip_file_in_explorer(self):
+        cid = next(c for c in self.clips("?status=rendered")["clips"] if c["video_url"])["id"]
+        with mock.patch.object(review, "open_in_explorer") as opened:
+            status, data, _ = self.call("POST", f"/api/clips/{cid}/open", {})
+        self.assertEqual(status, 200)
+        expected = self.cfg.clips_dir / self.folder_of(cid) / "clip.mp4"
+        opened.assert_called_once_with(expected)
+        self.assertEqual(Path(data["opened"]), expected)
+
+    def test_open_folder_is_protected_like_every_other_post(self):
+        cid = next(c for c in self.clips("?status=rendered")["clips"] if c["video_url"])["id"]
+        with mock.patch.object(review, "open_in_explorer") as opened:
+            self.assertEqual(self.call("POST", f"/api/clips/{cid}/open", {}, {"Origin": "http://evil.example"})[0], 403)
+            self.assertEqual(self.call("POST", f"/api/clips/{cid}/open", {}, {"Host": "evil.example"})[0], 403)
+            self.assertEqual(self.call("POST", f"/api/clips/{cid}/open", None,
+                                       {"Content-Type": "text/plain"})[0], 415)
+            self.assertEqual(self.call("POST", "/api/clips/99999/open", {})[0], 404)
+        opened.assert_not_called()
+
+    def test_open_folder_prefers_the_exported_file_and_refuses_deleted_clips(self):
+        cid = next(c for c in self.clips("?status=rendered")["clips"] if c["video_url"])["id"]
+        exported = self.cfg.exports_dir / "2026-01-01" / "slot-1" / "youtube" / "x.mp4"
+        exported.parent.mkdir(parents=True, exist_ok=True)
+        exported.write_bytes(MP4)
+        db.mark_exported(self.cfg.database, cid, exported)
+        with mock.patch.object(review, "open_in_explorer") as opened:
+            self.assertEqual(self.call("POST", f"/api/clips/{cid}/open", {})[0], 200)
+            opened.assert_called_once_with(exported)
+            self.call("POST", f"/api/clips/{cid}/status", {"action": "reject"})            # reject deletes the files at once
+            self.assertEqual(self.call("POST", f"/api/clips/{cid}/open", {})[0], 404)
+            opened.assert_called_once()
+
     def titles(self, qs):
         return [c["title"] for c in self.clips(qs)["clips"]]
 
@@ -136,7 +172,7 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(clip["sensitive_reason"], "mild insult")
         self.assertEqual(clip["credit"], CREDIT)
         self.assertNotIn(CREDIT, clip["description_body"])
-        self.assertNotIn(str(self.cfg.clips_dir), json.dumps(clip))     # no local paths leak to the browser
+        self.assertEqual(Path(clip["local_path"]), self.cfg.clips_dir / self.folder_of(clip["id"]) / "clip.mp4")
         skipped = self.clips("?status=skipped")["clips"][0]
         self.assertIsNone(skipped["video_url"])
         self.assertEqual(skipped["skip_reason"], "score too low")

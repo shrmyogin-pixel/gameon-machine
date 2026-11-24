@@ -30,7 +30,8 @@ from zoneinfo import ZoneInfo
 
 from . import db
 from .config import PROJECT_ROOT, Config, get_env_key
-from .hookscore import HookScore, banned_in, rank_hooks, words_of
+from .buckets import BUCKETS, classify, enforce_mix
+from .hookscore import HookScore, banned_in, closer_banned, rank_hooks, restates_hook, words_of
 from .lifecycle import story_keys, url_key
 from .newsimage import fetch_news_images, images_from_entry
 from .profanity import mask
@@ -80,6 +81,7 @@ class Pick:
     sensitive: bool
     sensitive_reason: str
     reason: str
+    bucket: str = ""               # streamer | giveaway | achievement | whats_new (see buckets.py)
     major_new: bool = False        # Claude says: a completely new major announcement (may repeat a topic covered < 24 h ago)
     core_fact: str = ""            # trend items: the one verified fact the Short is built on
 
@@ -150,7 +152,8 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
         links.add(s.link)
         titles.add(key)
         unique.append(s)
-    unique = unique[:int(cfg.news["max_candidates"])]
+    from .buckets import balance
+    unique = balance(unique, int(cfg.news["max_candidates"]))     # a mix of streamer / giveaway / achievement / what's-new
     for i, s in enumerate(unique, start=1):
         s.id = i
     return unique
@@ -166,23 +169,28 @@ CANDIDATE STORIES (all published in the last {hours} hours): id | outlet | age |
 {rows}
 {covered}
 TASK
-Choose the {n} best stories to turn into 35-second Shorts. Prefer, in order: breaking gaming news and official reveals; free game offers (Epic, Steam, PS Plus, Game Pass, Prime Gaming ...) that are live right now; confirmed leaks (labelled as leaks); big patch or update news. STRICT TOPIC DIVERSITY: pick stories about DIFFERENT games / franchises / platforms - never more than ONE story about the same game or franchise (e.g. at most one GTA 6 story, however many are listed). Never repeat an event the channel already covered (listed above, if any), even from a different outlet, and avoid any game / franchise already covered in the last 24 hours - unless the story is a completely NEW major announcement (new reveal, release date, delay), in which case set "major_new": true. Prefer variety across PC, PlayStation, Xbox, Nintendo, free games and esports. Skip real-money gambling or betting, hate or harassment, anything about minors, graphic violence, and pure opinion / guide / review pieces.
+Choose the {n} best stories to turn into 35-second Shorts. MIX THE FOUR BUCKETS so a run is never all one kind: (streamer) streamer and creator news: milestones, sub / view / record achievements, big events, drama or updates reported by outlets such as Dexerto, Dot Esports, Kotaku or PC Gamer; (giveaway) legitimate giveaways, free games and drops: free Epic / Steam / console games, Twitch / YouTube drops, verified creator giveaways - never real-money gambling, never shady links or sign-up-for-cash schemes; (achievement) major achievements and esports / community milestones: world firsts, records, tournament upsets, studio milestones; (whats_new) what's new and worth knowing: new patches, free updates, notable releases, hidden mechanics and tips. Take at most 2 stories from one bucket and cover as many different buckets as the candidates allow. Beyond that mix prefer: breaking gaming news and official reveals; free game offers that are live right now; confirmed leaks (labelled as leaks). STRICT TOPIC DIVERSITY: pick stories about DIFFERENT games / franchises / platforms - never more than ONE story about the same game or franchise (e.g. at most one GTA 6 story, however many are listed). Never repeat an event the channel already covered (listed above, if any), even from a different outlet, and avoid any game / franchise already covered in the last 24 hours - unless the story is a completely NEW major announcement (new reveal, release date, delay), in which case set "major_new": true. Prefer variety across PC, PlayStation, Xbox, Nintendo, free games, streamers and esports. Skip real-money gambling or betting, hate or harassment, anything about minors, graphic violence, and pure opinion / guide / review pieces.
 Use ONLY facts found in the headline and summary. Never invent dates, prices, names or details; if a detail (such as an end date) is not given, leave it out. Say "reportedly", "leak" or "rumour" for anything unconfirmed.
 
 FOR EACH STORY write:
-- script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: concrete details FIRST (price, date, platform, number, name), punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler openers or closers. Then one line on why it matters, then one short closing line. NEVER repeat the headline or the hook: do not reuse 5 or more words in a row from the story's headline, say it in your own words. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
-- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must name the game, platform or store inside its FIRST 6 WORDS and carry urgency or the news itself in those same first words (free, today, now, leak, confirmed, officially, delayed ...). Use 5 different angles. No banned filler.
+- script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: concrete details FIRST (price, date, platform, number, name), punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler openers or closers. Then one line on why it matters, then ONE closing line that follows the CLOSING rules below. NEVER repeat the headline or the hook: do not reuse 5 or more words in a row from the story's headline, say it in your own words. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
+- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must name the game, platform, store or creator inside its FIRST 6 WORDS (put that creator in subjects too) and carry urgency or the news itself in those same first words (free, today, now, leak, confirmed, officially, delayed ...). Use 5 different angles. No banned filler.
 - subjects: the game / platform / store names exactly as they appear in your hooks (1-4 short strings). Put the MAIN GAME'S proper title first (e.g. "Alan Wake 2"): it is used to search for matching screenshots.
 - headline: the on-screen headline card, max 70 characters, no emoji, no profanity.
 - title: video title, 25-60 characters, game or platform within its first 4 words, no emoji.
 - description: one line, max 90 characters.
 - tags: 8-15 search tags. hashtags: 3-6 hashtags that start with #.
-- kind: "news" or "free_offer".  score: 0-10, how strong this story is for the channel today.
+- kind: "news" or "free_offer".  bucket: "streamer", "giveaway", "achievement" or "whats_new".  score: 0-10, how strong this story is for the channel today.
 - sensitive: true only when a human should look carefully (add sensitive_reason), else false.
 - reason: one sentence on why you chose it.
 
+HOOK AND CLOSING RULES (strict, they decide whether people stay):
+- OPENING (spoken in the first 1-2.5 seconds): NEVER a greeting ("hey gamers", "welcome back"), never filler ("breaking news today") and never a dry headline read. Open on an immediate curiosity gap, a bold claim, or what is at stake for the viewer, then lead straight into the story. Examples of the energy: "Stop scrolling if you play Fortnite.", "One streamer just broke a record nobody thought was possible.", "You have 48 hours to claim this free game before it's gone."
+- The script_body must CONTINUE from the hook with new facts. It must never restate the hook in other words.
+- CLOSING (the last 2-3 seconds, the last sentence of script_body, at most 12 words): NEVER "thanks for watching", "follow for more", "see you next time", "watch this space" or any slow generic outro. End on a punchy final twist, a debate question the viewer wants to answer, or a loop line that flows naturally back into the opening hook. It must make sense if the video starts over.
+
 Reply with STRICT JSON only (no prose, no code fences):
-{"stories": [{"id": 3, "kind": "news", "score": 8, "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "reason": "..."}]}"""
+{"stories": [{"id": 3, "kind": "news", "bucket": "streamer", "score": 8, "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "reason": "..."}]}"""
 
 TREND_PROMPT = """You are the news editor and scriptwriter of Game On, a gaming news YouTube Shorts channel.
 
@@ -200,17 +208,22 @@ Choose up to {n} topics worth an ORIGINAL 35-second Game On Short (viral gaming 
 Use ONLY facts you can stand behind; never invent dates, prices or names; say "reportedly" for anything unconfirmed. STRICT TOPIC DIVERSITY: different games each, never two on the same game or franchise, and avoid games already covered in the last 24 hours (unless a completely new major announcement: "major_new": true). Skip real-money gambling or betting, hate or harassment, anything about minors, graphic violence.
 
 FOR EACH TOPIC write:
-- script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: the concrete fact FIRST, punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler. Then why it matters, then one short closing line. Never reuse 5 or more words in a row from the topic's title. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
-- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must name the game, platform or store inside its FIRST 6 WORDS and carry urgency or the surprise itself in those first words. 5 different angles. No banned filler.
+- script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: the concrete fact FIRST, punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler. Then why it matters, then ONE closing line that follows the CLOSING rules below. Never reuse 5 or more words in a row from the topic's title. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
+- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must name the game, platform, store or creator inside its FIRST 6 WORDS (put that creator in subjects too) and carry urgency or the surprise itself in those first words. 5 different angles. No banned filler.
 - subjects: the game / platform / store names exactly as they appear in your hooks (1-4 short strings). Put the MAIN GAME'S proper title first (e.g. "Alan Wake 2"): it is used to search for matching screenshots.
 - headline: max 70 characters, no emoji. title: 25-60 characters, game or platform within its first 4 words, no emoji. description: one line, max 90 characters.
 - tags: 8-15 search tags. hashtags: 3-6 hashtags that start with #.
-- kind: "trend" or "free_offer".  score: 0-10.  verified: true/false.  core_fact: the fact.  major_new: true/false.
+- kind: "trend" or "free_offer".  bucket: "streamer", "giveaway", "achievement" or "whats_new".  score: 0-10.  verified: true/false.  core_fact: the fact.  major_new: true/false.
 - sensitive: true only when a human should look carefully (add sensitive_reason), else false.
 - reason: one sentence on why you chose it.
 
+HOOK AND CLOSING RULES (strict, they decide whether people stay):
+- OPENING (spoken in the first 1-2.5 seconds): NEVER a greeting ("hey gamers", "welcome back"), never filler ("breaking news today") and never a dry headline read. Open on an immediate curiosity gap, a bold claim, or what is at stake for the viewer, then lead straight into the story. Examples of the energy: "Stop scrolling if you play Fortnite.", "One streamer just broke a record nobody thought was possible.", "You have 48 hours to claim this free game before it's gone."
+- The script_body must CONTINUE from the hook with new facts. It must never restate the hook in other words.
+- CLOSING (the last 2-3 seconds, the last sentence of script_body, at most 12 words): NEVER "thanks for watching", "follow for more", "see you next time", "watch this space" or any slow generic outro. End on a punchy final twist, a debate question the viewer wants to answer, or a loop line that flows naturally back into the opening hook. It must make sense if the video starts over.
+
 Reply with STRICT JSON only (no prose, no code fences):
-{"stories": [{"id": 3, "kind": "trend", "score": 8, "verified": true, "core_fact": "...", "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "reason": "..."}]}"""
+{"stories": [{"id": 3, "kind": "trend", "bucket": "whats_new", "score": 8, "verified": true, "core_fact": "...", "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "reason": "..."}]}"""
 
 RETRY_NOTE = ("\n\nYour previous reply was rejected: {why}. Reply again with ONLY the JSON object "
               "- no prose, no markdown, no code fences.")
@@ -332,6 +345,13 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                 raise NewsError("script_body uses banned filler: " + ", ".join(bad))
             if echo := repeated_run(by_id[sid].title, body):
                 raise NewsError(f"script_body repeats the source headline ('{echo}'); say it in your own words")
+            bucket = d.get("bucket")
+            if bucket not in BUCKETS:
+                bucket = classify(by_id[sid].title + " " + by_id[sid].summary) or ("giveaway" if kind == "free_offer" else "whats_new")
+            if bad := closer_banned(body):
+                raise NewsError("the closing line is a generic outro (" + ", ".join(bad) + "); end on a twist, a debate question or a loop line")
+            if len(words_of(re.split(r"(?<=[.!?])\s+", body.strip())[-1])) > 14:
+                raise NewsError("the closing line must be short and punchy (at most 12 words)")
             ranked = rank_hooks(hooks_raw, subjects)
             body_words = len(body.split())
             chosen = next((h for h in ranked if h.valid and lo <= h.words + body_words <= hi), None)
@@ -340,6 +360,8 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                     raise NewsError("no valid hook: " + "; ".join(f"'{h.hook[:30]}' {', '.join(h.reasons)}" for h in ranked))
                 raise NewsError(f"hook + script_body must total {lo}-{hi} words; script_body has {body_words}, "
                                 f"hooks have {min(h.words for h in ranked)}-{max(h.words for h in ranked)}")
+            if restates_hook(chosen.hook, body):
+                raise NewsError("script_body starts by restating the hook; continue with NEW facts instead")
             pick = Pick(
                 story=by_id[sid], kind=kind, score=float(score), subjects=subjects, hooks=ranked, hook=chosen,
                 body=body, script=final_script(chosen.hook, body), headline=_text(d, "headline", 8, 70),
@@ -347,7 +369,7 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                 tags=_list(d, "tags", 8, 15),
                 hashtags=["#" + h.lstrip("#").replace(" ", "") for h in _list(d, "hashtags", 0, 30)],
                 sensitive=d["sensitive"], sensitive_reason=mask(str(d.get("sensitive_reason") or "")),
-                reason=mask(str(d.get("reason") or "")), major_new=d.get("major_new") is True,
+                reason=mask(str(d.get("reason") or "")), bucket=bucket, major_new=d.get("major_new") is True,
                 core_fact=mask(str(d.get("core_fact") or "")))
             if len(pick.description) > 90:
                 raise NewsError("'description' is longer than 90 characters")
@@ -380,6 +402,9 @@ def pick_stories(cfg: Config, stories: list[Story], n: int, work_dir: Path, tren
                 log.info("news: dropped (topic diversity): %s", why)
             if not kept:
                 raise NewsError("every pick repeated a topic: " + "; ".join(dropped))
+            kept, over = enforce_mix(kept, int(cfg.news.get("bucket_max", 2)))
+            for why in over:
+                log.info("news: dropped (bucket mix): %s", why)
             return kept
         except (NewsError, EditorError) as exc:
             last = str(exc)
@@ -602,10 +627,13 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         if dur > float(cfg.clip["max_seconds"]) - 0.4:
             raise NewsError(f"voiceover is {dur:.1f}s, longer than the {cfg.clip['max_seconds']}s Short limit")
         words, how = get_words(cfg, mp3, pick.script, dur)
+        from .pacing import tighten
+        words, dur, _saved = tighten(cfg, mp3, words, dur)          # dead-air pauses over 0.7 s are cut down
         (folder / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
 
         info = {"hook": pick.hook.hook, "headline": pick.headline, "kind": pick.kind, "outlet": story.outlet,
-                "title": pick.title, "images": [v["file"] for v in visuals], "music": track}
+                "title": pick.title, "images": [v["file"] for v in visuals], "music": track, "lang": "en",
+                "bucket": pick.bucket}
         render = render_news_video(cfg, folder, info, words, dur)
 
         credit = credit_for_story(story)
@@ -632,7 +660,7 @@ def make_short(cfg: Config, pick: Pick) -> Path:
             "trend": ({"source": story.trend.get("source"), "signal": story.trend.get("signal"), "core_fact": pick.core_fact,
                        "origin_url": story.link} if trend else None),
             "news": {"url": story.link, "outlet": story.outlet, "headline": story.title, "kind": pick.kind,
-                     "published": story.published.isoformat(timespec="minutes"), "script": pick.script,
+                     "published": story.published.isoformat(timespec="minutes"), "script": pick.script, "bucket": pick.bucket,
                      "hooks": [{"hook": h.hook, "score": h.total, "valid": h.valid, "parts": h.parts,
                                 "reasons": h.reasons} for h in pick.hooks],
                      "voice": voice, "word_timestamps": how,

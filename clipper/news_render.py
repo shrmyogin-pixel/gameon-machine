@@ -1,11 +1,11 @@
 """Render a news Short: voiceover + background music + cutting visuals + dark scrim + headline card + watermark + captions.
 
 The background is 4-6 distinct REAL pictures (the article's own, see newsimage.py, topped up with topic-matched game
-screenshots from imagesearch.py) with a clean cut every 3.5-5 seconds, each under a slow, subtle Ken Burns zoom/pan and
-a dark scrim. There is never a gradient, text slide or generated placeholder behind the Short: a picture that cannot be
+screenshots from imagesearch.py) with a clean cut every 2.5-4.5 seconds, each under a slow, subtle Ken Burns zoom/pan and
+a light scrim (only behind the text). There is never a gradient, text slide or generated placeholder behind the Short: a picture that cannot be
 decoded is dropped, and with none left the render fails (the story is skipped). Under the voiceover (-14 LUFS)
 a Creative Commons track sits at about -25 LUFS (music.py) and the final mix is normalized to -14 LUFS. On top: the
-hook, a kicker ("BREAKING NEWS" / "FREE GAME OFFER"), the story headline, the 3-word bold captions and the source
+hook, a kicker ("BREAKING NEWS" / "FREE GAME OFFER"), the story headline, the word-by-word 2-3 word pop captions and the source
 outlet. It goes through the same hardware-encoder / below-normal-priority / one-render-at-a-time path as live
 clips (render.py).
 Layout on 1080x1920: hook banner y~150, kicker ~600, headline ~660-900, captions y=1180, source ~1330,
@@ -16,33 +16,36 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from .buckets import LABELS as BUCKET_KICKERS
 from .config import Config
 from .hookscore import words_of
 from .profanity import mask
-from .render import (ACCENT, CAPTION_Y, accent_text, pop_tags, ENCODER_ARGS, FONT_DIRS, H, SAFE_BOTTOM, W, RenderError, _ass_text, _ass_time,
-                     _ffmpeg, _fp, _slot, audio_chain, caption_fonts, caption_groups, pick_encoder, watermark_parts)
+from .render import (ACCENT, CAPTION_Y, accent_text, pop_tags, pop_caption_events, ENCODER_ARGS, FONT_DIRS, H, SAFE_BOTTOM, W, RenderError,
+                     _ass_text, _ass_time, _ffmpeg, _fp, _slot, audio_chain, caption_fonts, pick_encoder, watermark_parts)
 
 log = logging.getLogger("clipper")
 
-TAIL_SECONDS = 0.5             # picture stays up a moment after the voice ends
+TAIL_SECONDS = 0.3             # picture stays up a moment after the voice ends
 FPS = 30
 PICTURE_TIMEOUT = 600          # a picture render that takes longer than this is stuck
 KB_ZOOM = 0.08                 # Ken Burns: zoom grows from 1.00x to 1.08x within a cut (subtle, no shaky crops)
 CYAN, MAGENTA, YELLOW, WHITE, NAVY = "&H00FFF000&", "&H00D62BFF&", "&H0000F2FF&", "&H00FFFFFF&", "&H00300A14&"   # Tokyo Neon (BGR)
 KICKER_Y, NEWS_HOOK_Y = 150, 235      # kicker chip then the big hook, both below the Shorts top bar
-CUT_SECONDS = 4.2              # target length of a cut
-MIN_CUT, MAX_CUT = 3.5, 5.0    # every cut lasts between these
+CUT_SECONDS = 3.4              # target length of a cut
+MIN_CUT, MAX_CUT = 2.5, 4.5    # every cut lasts between these
 XFADE = 0.4                    # seconds each transition overlaps the next picture
 TRANSITIONS = ["fade", "smoothleft", "slideleft", "smoothright", "wipeleft"]      # clean and calm: no spinning / zooming wipes
 
 
 def build_news_ass(info: dict, words: list, dur: float) -> str:
     """Hook + kicker + headline + source for the whole Short, and the captions from the word timestamps."""
-    f = caption_fonts("en")
+    lang = str(info.get("lang") or "en")
+    f = caption_fonts(lang)
     hook = _ass_text(mask(info["hook"]).upper())
     n = len(words_of(hook))
     hook_size = 118 if n <= 5 else 104 if n <= 8 else 90
-    kicker = {"free_offer": "FREE GAME OFFER", "trend": "TRENDING NOW"}.get(info.get("kind"), "BREAKING NEWS")
+    kicker = {"free_offer": "FREE GAME OFFER", "trend": "TRENDING NOW"}.get(info.get("kind")) \
+        or BUCKET_KICKERS.get(info.get("bucket"), "BREAKING NEWS")
     source = _ass_text(mask(f"Source: {info['outlet']}"))
     total = dur + TAIL_SECONDS
     header = f"""[Script Info]
@@ -54,9 +57,9 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,Impact,{hook_size},{WHITE},&H000000FF,{CYAN},{MAGENTA},0,0,0,0,100,100,2,0,1,8,6,8,90,90,0,1
-Style: Glow,Impact,{hook_size},{CYAN},&H000000FF,{MAGENTA},&H00000000,0,0,0,0,100,100,2,0,1,16,0,8,90,90,0,1
-Style: Cap,Impact,{f['cap_size']},{WHITE},&H000000FF,{NAVY},{MAGENTA},0,0,0,0,100,100,1,0,1,9,6,5,90,90,0,1
+Style: Hook,{f['Hook']},{hook_size},{WHITE},&H000000FF,{CYAN},{MAGENTA},0,0,0,0,100,100,2,0,1,8,6,8,90,90,0,1
+Style: Glow,{f['Hook']},{hook_size},{CYAN},&H000000FF,{MAGENTA},&H00000000,0,0,0,0,100,100,2,0,1,16,0,8,90,90,0,1
+Style: Cap,{f['Cap']},{f['cap_size']},{WHITE},&H000000FF,{NAVY},{MAGENTA},0,0,0,0,100,100,1,0,1,9,6,5,90,90,0,1
 Style: Kicker,{f['head']},46,{NAVY},&H000000FF,{YELLOW},{MAGENTA},0,0,0,0,100,100,5,0,1,12,4,8,90,90,0,1
 Style: Src,{f['head']},34,&H00F0F0F0,&H000000FF,{NAVY},&H96000000,0,0,0,0,100,100,0,0,1,5,3,8,90,90,0,1
 
@@ -70,8 +73,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
              ev(2, "Hook", W // 2, NEWS_HOOK_Y, "\\blur1" + pop_tags(260), accent_text(hook, ACCENT, WHITE)),
              ev(3, "Kicker", W // 2, KICKER_Y, pop_tags(240, 60, 110), kicker),
              ev(0, "Src", W // 2, 1330, "", source)]
-    for a, b, text in caption_groups(words, 0.0, dur + 0.05):
-        lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Cap,,0,0,0,,{{\\an5\\pos({W // 2},{CAPTION_Y}){pop_tags()}}}{accent_text(text)}")
+    lines += pop_caption_events(words, 0.0, dur + 0.05, lang, y=CAPTION_Y, size=f["cap_size"])
     return header + "\n".join(lines) + "\n"
 
 
@@ -82,7 +84,7 @@ def scrim_png(path: Path) -> Path:
     import numpy as np
     ys = np.linspace(0.0, 1.0, H)
     pts_y = [0.0, 0.07, 0.20, 0.30, 0.40, 0.55, 0.60, 0.72, 1.0]     # fractions of the frame height
-    pts_a = [0.62, 0.55, 0.30, 0.05, 0.0, 0.0, 0.10, 0.50, 0.60]      # dark only behind the hook and the captions
+    pts_a = [0.42, 0.36, 0.18, 0.0, 0.0, 0.0, 0.06, 0.30, 0.38]      # dark only behind the hook and the captions
     alpha = np.interp(ys, pts_y, pts_a)
     img = np.zeros((H, W, 4), np.uint8)
     img[..., 3] = (alpha[:, None] * 255).astype(np.uint8)
