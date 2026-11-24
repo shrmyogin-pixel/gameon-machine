@@ -14,8 +14,11 @@ BUCKET = 5  # seconds
 
 
 def session_dir(sessions_dir: Path, platform: str, handle: str) -> Path:
-    """data/sessions/<platform>-<handle>/<YYYYMMDD-HHMMSS>/ (same layout the recorder uses)."""
-    return sessions_dir / f"{platform}-{safe_handle(handle)}".lower() / f"{datetime.now():%Y%m%d-%H%M%S}"
+    """data/sessions/_chat-tests/<platform>-<handle>/<YYYYMMDD-HHMMSS>/.
+
+    Kept outside the recorder's <platform>-<handle> folders because Recorder.cleanup() removes
+    session folders that hold no .ts segments."""
+    return sessions_dir / "_chat-tests" / f"{platform}-{safe_handle(handle)}".lower() / f"{datetime.now():%Y%m%d-%H%M%S}"
 
 
 async def _run(link: str, seconds: int, sessions_dir: Path) -> int:

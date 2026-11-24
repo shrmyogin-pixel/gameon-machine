@@ -105,6 +105,7 @@ class Recorder(threading.Thread):
         log.info("[%s] recording started -> %s", self.name_, session_dir)
         sl = ff = None
         sl_log = ff_log = None
+        chat = None
         reason = "error"
         try:
             sl_log = (session_dir / "streamlink.log").open("wb")
@@ -114,6 +115,7 @@ class Recorder(threading.Thread):
             ff = subprocess.Popen(self._ffmpeg_cmd(session_dir), stdin=sl.stdout, stdout=subprocess.DEVNULL,
                                   stderr=ff_log, creationflags=_flags(self.cfg.raw["encoding"].get("below_normal_priority", True)))
             sl.stdout.close()  # ffmpeg owns the pipe now, so it sees end-of-stream when streamlink exits
+            chat = self._start_chat(session_dir)
             last_clean = time.monotonic()
             while not self.stop_event.is_set() and ff.poll() is None:
                 self.stop_event.wait(2)
@@ -125,12 +127,32 @@ class Recorder(threading.Thread):
             log.exception("[%s] recording crashed", self.name_)
             reason = "error"
         finally:
+            chat_count = None
+            if chat is not None:
+                try:
+                    chat_count = chat.stop()
+                except Exception:
+                    log.exception("[%s] could not stop chat capture", self.name_)
             self._shutdown(sl, ff)
             for f in (sl_log, ff_log):
                 if f:
                     f.close()
-            self._close_session(session_dir, started, reason)
+            self._close_session(session_dir, started, reason, chat_count)
             self.active_dir = None
+
+    def _start_chat(self, session_dir: Path):
+        """Capture chat into <session>/chat.jsonl. Failure here must never affect recording."""
+        if not self.opts.get("capture_chat", True):
+            return None
+        try:
+            from .chat.capture import ChatCapture
+
+            cap = ChatCapture(self.stream["url"], session_dir / "chat.jsonl", label=self.name_)
+            cap.start()
+            return cap
+        except Exception:
+            log.exception("[%s] could not start chat capture; recording continues without chat", self.name_)
+            return None
 
     def _shutdown(self, sl, ff) -> None:
         """Stop streamlink first; ffmpeg then finishes its last segment on its own."""
@@ -147,7 +169,7 @@ class Recorder(threading.Thread):
                 ff.kill()
                 ff.wait()
 
-    def _close_session(self, session_dir: Path, started: datetime, reason: str) -> None:
+    def _close_session(self, session_dir: Path, started: datetime, reason: str, chat_count: int | None = None) -> None:
         segments = sorted(session_dir.glob("seg_*.ts"))
         info = {
             "stream": self.name_,
@@ -157,6 +179,8 @@ class Recorder(threading.Thread):
             "end_reason": reason,
             "segments_written": len(segments),
         }
+        if chat_count is not None:
+            info["chat_messages"] = chat_count
         try:
             (session_dir / "session.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
         except OSError:
@@ -167,7 +191,11 @@ class Recorder(threading.Thread):
 
     # ---------- housekeeping ----------
     def cleanup(self) -> None:
-        """Delete segments older than keep_hours, and closed sessions that became empty."""
+        """Delete segments older than keep_hours, and closed sessions that became empty.
+
+        The active session is never removed (its chat.jsonl is still being written); a closed
+        session with no segments left is removed whole, chat.jsonl included, since chat without
+        footage is useless."""
         if not self.stream_dir.is_dir():
             return
         cutoff = time.time() - float(self.opts["keep_hours"]) * 3600
