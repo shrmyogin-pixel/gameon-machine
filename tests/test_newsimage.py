@@ -343,9 +343,9 @@ class PictureRenderTests(unittest.TestCase):
         self.assertEqual(self.probe(self.folder / "clip.mp4", "stream=codec_name", "a:0"), "aac")
         for left in ("scrim.png", "captions.ass") + tuple(f"visual_{i}.jpg" for i in range(3)):
             self.assertFalse((self.folder / left).exists(), left)
-        # cut points are at ~4.1 s, ~8.3 s and ~12.4 s: frames either side of a cut differ a lot, frames within a cut differ little
-        across = np.abs(self.frame(3.9, "a.png") - self.frame(4.4, "b.png")).mean()
-        within = np.abs(self.frame(1.5, "c.png") - self.frame(2.0, "d.png")).mean()
+        # cut points (5 cuts over ~16.3 s) are at ~3.3 s, ~6.5 s, ~9.8 s and ~13.1 s: frames either side of a cut differ a lot, frames within a cut differ little
+        across = np.abs(self.frame(3.1, "a.png") - self.frame(3.8, "b.png")).mean()
+        within = np.abs(self.frame(1.0, "c.png") - self.frame(1.5, "d.png")).mean()
         self.assertGreater(across, 3 * within)
         self.assertGreater(float(np.abs(self.frame(0.2, "e.png") - self.frame(3.6, "f.png")).mean()), 1.0)
         # scrim: the caption zone (dark scrim behind the captions) is darker than the same picture region unscrimmed
