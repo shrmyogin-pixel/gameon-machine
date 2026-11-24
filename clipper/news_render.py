@@ -100,6 +100,8 @@ def plan_segments(total: float, n_visuals: int, target: float = CUT_SECONDS) -> 
         n_seg -= 1
     while total / n_seg > MAX_CUT:
         n_seg += 1
+    if n_visuals >= 2 and MIN_CUT <= total / n_visuals <= MAX_CUT:
+        n_seg = n_visuals                       # one cut per picture: nothing repeats
     seg = total / n_seg
     order = [i % max(n_visuals, 1) for i in range(n_seg)]
     return [(idx, seg) for idx in order]

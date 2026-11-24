@@ -1,10 +1,15 @@
 """Hook scoring for news Shorts (voice.md: under 12 words, name the game/platform/offer, state the news now).
 
 score_hook() gives 0-10:
-    4.0  a game / platform / store name inside the FIRST 6 WORDS
+    4.0  a game / platform / store name inside the FIRST 6 WORDS (3.0 when a real curiosity gap - two cues - withholds
+         the name on purpose; the script's first sentence must then name it, see news.validate_reply)
     3.0  urgency inside the first 6 words (free, today, leak, breaking, ...): 1.5 for one cue, 3 for two or more
     1.5  a concrete specific (number, price, date) anywhere in the hook
     1.5  length: full marks for 6-10 words, half for 4-5 or 11-12
+    +3.0 curiosity bonus: a curiosity gap, bold claim or personal stake ("stop scrolling", "nobody thought", "48 hours",
+         "before it's gone", a question, "record", "never") - 3 for two or more cues, 1.5 for one
+The four parts above are scaled to 7 points and the curiosity bonus adds up to 3, so a plain "X just did Y" headline hook
+tops out at 7 while a hook with a gap or a stake can reach 10.
 A hook of more than 12 words, or one containing banned filler, is invalid and scores 0.
 
 Pure functions, no I/O.
@@ -63,6 +68,23 @@ def banned_in(text: str) -> list[str]:
     return [b for b in BANNED if re.search(r"(?<![a-z])" + re.escape(b) + r"(?![a-z])", low)]
 
 
+CURIOSITY = (r"stop scrolling", r"stop what", r"nobody", r"no one", r"never", r"only", r"secret", r"hidden", r"record",
+             r"broke", r"before (?:it'?s|they'?re|it) gone", r"\d+ (?:hours?|days?|minutes?)", r"why", r"what happens",
+             r"if you play", r"if you own", r"you (?:have|need|can still|missed)", r"missed", r"\?\s*$", r"this is why",
+             r"nobody (?:saw|expected|thought)", r"can'?t believe", r"wait", r"impossible", r"gone")
+
+
+def curiosity_cues(hook: str) -> list[str]:
+    low = re.sub(r"[’‘]", "'", hook.lower())
+    return [c for c in CURIOSITY if re.search(c, low)]
+
+
+def names_subject(text: str, subjects: list[str] | tuple = ()) -> bool:
+    """True when the text mentions one of the story's subjects (game / creator / store) or a platform."""
+    toks = words_of(text)
+    return any(_has_phrase(toks, n.strip()) for n in list(subjects) + list(PLATFORMS) if n and n.strip())
+
+
 def closer_banned(script: str) -> list[str]:
     """Generic outro phrases in the LAST sentence of a script (the closing line must be a twist / question / loop line)."""
     sentences = [x for x in re.split(r"(?<=[.!?])\s+", script.strip()) if x.strip()]
@@ -108,9 +130,13 @@ def score_hook(hook: str, subjects: list[str] | tuple = ()) -> HookScore:
 
     early = toks[:EARLY_WORDS]
     names = [s for s in list(subjects) + list(PLATFORMS) if s and s.strip()]
-    hit = next((s for s in sorted(names, key=len, reverse=True) if _has_phrase(early, s.strip())), None)
-    res.parts["name_early"] = 4.0 if hit else 0.0
-    res.reasons.append(f"name in first {EARLY_WORDS} words: {hit}" if hit else f"no game/platform name in first {EARLY_WORDS} words")
+    hit = next((s for s in sorted(names, key=len, reverse=True)
+                if _has_phrase(toks[:EARLY_WORDS + len(s.split()) - 1], s.strip())), None)   # the name may START in the first 6 words
+    deferred = not hit and len(curiosity_cues(hook)) >= 2            # a real curiosity gap may name the game in sentence 2
+    res.parts["name_early"] = 4.0 if hit else 3.0 if deferred else 0.0
+    res.reasons.append(f"name in first {EARLY_WORDS} words: {hit}" if hit else
+                       "name withheld on purpose (curiosity gap): named in sentence 2" if deferred else
+                       f"no game/platform name in first {EARLY_WORDS} words")
 
     cues = [t for t in early if t.lower() in URGENCY]
     res.parts["urgency_early"] = 3.0 if len(cues) >= 2 else 1.5 if cues else 0.0
@@ -122,7 +148,11 @@ def score_hook(hook: str, subjects: list[str] | tuple = ()) -> HookScore:
         res.reasons.append("has a number / price / date")
 
     res.parts["length"] = 1.5 if 6 <= n <= 10 else 0.75
-    res.total = round(min(sum(res.parts.values()), 10.0), 2)
+    cues = curiosity_cues(hook)
+    res.parts["curiosity"] = 3.0 if len(cues) >= 2 else 1.5 if cues else 0.0
+    res.reasons.append("curiosity gap / stake" if cues else "no curiosity gap or stake (plain headline)")
+    base = sum(v for k, v in res.parts.items() if k != "curiosity")
+    res.total = round(min(base * 0.7 + res.parts["curiosity"], 10.0), 2)
     return res
 
 

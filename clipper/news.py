@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 from . import db
 from .config import PROJECT_ROOT, Config, get_env_key
 from .buckets import BUCKETS, classify, enforce_mix
-from .hookscore import HookScore, banned_in, closer_banned, rank_hooks, restates_hook, words_of
+from .hookscore import HookScore, banned_in, closer_banned, names_subject, rank_hooks, restates_hook, words_of
 from .lifecycle import story_keys, url_key
 from .newsimage import fetch_news_images, images_from_entry
 from .profanity import mask
@@ -174,7 +174,7 @@ Use ONLY facts found in the headline and summary. Never invent dates, prices, na
 
 FOR EACH STORY write:
 - script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: concrete details FIRST (price, date, platform, number, name), punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler openers or closers. Then one line on why it matters, then ONE closing line that follows the CLOSING rules below. NEVER repeat the headline or the hook: do not reuse 5 or more words in a row from the story's headline, say it in your own words. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
-- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must name the game, platform, store or creator inside its FIRST 6 WORDS (put that creator in subjects too) and carry urgency or the news itself in those same first words (free, today, now, leak, confirmed, officially, delayed ...). Use 5 different angles. No banned filler.
+- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must carry urgency, a curiosity gap or the news itself in its first words (free, today, now, leak, confirmed, delayed, "stop scrolling", "nobody expected" ...) and name the game, platform, store or creator inside its FIRST 6 WORDS (put a creator in subjects too) - EXCEPT that up to 2 of the 5 may be pure curiosity-gap hooks that withhold the name ("One streamer just broke a record nobody thought possible."); if you use one, the FIRST sentence of script_body MUST name the game / creator / store. Use 5 different angles, and at least 3 of the 5 must open on a curiosity gap, a bold claim or a stake for the viewer ("Stop scrolling if you play ...", "Nobody expected ... to ...", "You have 48 hours to ...", a question) instead of a plain "X just did Y" headline. No banned filler.
 - subjects: the game / platform / store names exactly as they appear in your hooks (1-4 short strings). Put the MAIN GAME'S proper title first (e.g. "Alan Wake 2"): it is used to search for matching screenshots.
 - headline: the on-screen headline card, max 70 characters, no emoji, no profanity.
 - title: video title, 25-60 characters, game or platform within its first 4 words, no emoji.
@@ -209,7 +209,7 @@ Use ONLY facts you can stand behind; never invent dates, prices or names; say "r
 
 FOR EACH TOPIC write:
 - script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: the concrete fact FIRST, punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler. Then why it matters, then ONE closing line that follows the CLOSING rules below. Never reuse 5 or more words in a row from the topic's title. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
-- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must name the game, platform, store or creator inside its FIRST 6 WORDS (put that creator in subjects too) and carry urgency or the surprise itself in those first words. 5 different angles. No banned filler.
+- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must carry urgency, a curiosity gap or the news itself in its first words (free, today, now, leak, confirmed, delayed, "stop scrolling", "nobody expected" ...) and name the game, platform, store or creator inside its FIRST 6 WORDS (put a creator in subjects too) - EXCEPT that up to 2 of the 5 may be pure curiosity-gap hooks that withhold the name ("One streamer just broke a record nobody thought possible."); if you use one, the FIRST sentence of script_body MUST name the game / creator / store. 5 different angles, and at least 3 of the 5 must open on a curiosity gap, a bold claim or a stake for the viewer instead of a plain "X just did Y" headline. No banned filler.
 - subjects: the game / platform / store names exactly as they appear in your hooks (1-4 short strings). Put the MAIN GAME'S proper title first (e.g. "Alan Wake 2"): it is used to search for matching screenshots.
 - headline: max 70 characters, no emoji. title: 25-60 characters, game or platform within its first 4 words, no emoji. description: one line, max 90 characters.
 - tags: 8-15 search tags. hashtags: 3-6 hashtags that start with #.
@@ -360,6 +360,8 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                     raise NewsError("no valid hook: " + "; ".join(f"'{h.hook[:30]}' {', '.join(h.reasons)}" for h in ranked))
                 raise NewsError(f"hook + script_body must total {lo}-{hi} words; script_body has {body_words}, "
                                 f"hooks have {min(h.words for h in ranked)}-{max(h.words for h in ranked)}")
+            if not names_subject(chosen.hook, subjects) and not names_subject(body.split(".")[0], subjects):
+                raise NewsError("the hook withholds the game / creator name, so the first sentence of script_body must name it")
             if restates_hook(chosen.hook, body):
                 raise NewsError("script_body starts by restating the hook; continue with NEW facts instead")
             pick = Pick(

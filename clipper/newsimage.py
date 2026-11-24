@@ -285,6 +285,16 @@ def ahash(img) -> int:
     return sum(1 << i for i, b in enumerate(bits) if b)
 
 
+def looks_like_web_page(img) -> bool:
+    """A screenshot of a store / subscription / settings page rather than game art: mostly near-white, low-colour pixels
+    (game art, even bright art, is far more saturated: measured 0-24 % pale pixels vs 80 % for a store page)."""
+    import cv2
+    hsv = cv2.cvtColor(cv2.resize(img, (160, 90), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2HSV)
+    sat, val = hsv[..., 1], hsv[..., 2]
+    pale = float(((val > 215) & (sat < 30)).mean())
+    return pale > 0.35 and float(sat.mean()) < 45
+
+
 def save_picture(data: bytes, dest: Path, known_hashes: list[int] | None = None) -> dict | None:
     """Decode `data`; if it is a usable, not-yet-seen photo save it as a JPEG at `dest`.
 
@@ -298,6 +308,8 @@ def save_picture(data: bytes, dest: Path, known_hashes: list[int] | None = None)
     if w < MIN_WIDTH or h < MIN_HEIGHT or not MIN_ASPECT <= w / h <= MAX_ASPECT:
         return None
     if float(img.std()) < 6.0:                                   # an almost flat picture: a placeholder, not a photo
+        return None
+    if looks_like_web_page(img):                                 # a store / subscription / settings page screenshot
         return None
     digest = ahash(img)
     if any(bin(digest ^ k).count("1") <= DUPLICATE_BITS for k in (known_hashes or [])):

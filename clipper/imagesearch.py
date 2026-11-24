@@ -26,9 +26,9 @@ from .newsimage import MAX_ASPECT, MIN_ASPECT, MIN_HEIGHT, MIN_WIDTH
 
 log = logging.getLogger("clipper")
 
-SEARCH_DEADLINE_SECONDS = 75         # whole topic hunt per story
-MAX_DOWNLOADS = 14                   # downloads tried per story
-SUFFIXES = ("screenshot", "gameplay", "screenshot 4k", "official art")
+SEARCH_DEADLINE_SECONDS = 110        # whole topic hunt per story
+MAX_DOWNLOADS = 26                   # downloads tried per story
+SUFFIXES = ("screenshot", "gameplay", "screenshot 4k", "official art", "in-game screenshot", "key art", "streaming")
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 STOP = {"the", "a", "an", "of", "and", "for", "to", "in", "on", "game", "games", "gaming", "new", "free", "pc", "ps5", "ps4",
         "xbox", "steam", "epic", "nintendo", "switch", "playstation"}
@@ -57,6 +57,16 @@ def relevant(topic: str, *blobs: str) -> bool:
     have = sum(1 for t in tokens if re.search(r"(?<![a-z0-9])" + re.escape(t) + r"(?![a-z0-9])", text))
     need = len(tokens) if len(tokens) <= 2 else -(-len(tokens) * 2 // 3)
     return have >= need
+
+
+# Hits whose title / page / file name says they are a web page, store screen, price list or UI, not game art.
+UI_HIT = re.compile(r"(subscription|pricing|price[- ]?list|membership|sign[- ]?up|log[- ]?in|checkout|settings|dashboard|"
+                    r"interface|menu|homepage|website|web ?page|ui|hud|logo|icon|banner|wallpaper|infographic|"
+                    r"comparison chart|plans?|store page|eshop)", re.I)
+
+
+def looks_like_ui(*blobs: str) -> bool:
+    return bool(UI_HIT.search(" ".join(b for b in blobs if b)))
 
 
 # ------------------------------------------------------------------ validation
@@ -177,6 +187,8 @@ def fetch_topic_images(topic: str, folder: Path, cache_root: Path, need: int, kn
                     continue
                 tried.add(url)
                 if (hit["width"] and hit["width"] < MIN_WIDTH) or not relevant(topic, hit["title"], hit["page"], url):
+                    continue
+                if looks_like_ui(hit["title"], url):                 # store / price / menu screenshots are not game art
                     continue
                 downloads += 1
                 probe = folder / "topic_probe.jpg"

@@ -49,13 +49,13 @@ class CaptionTests(unittest.TestCase):
         self.assertIn("&H00FFF000&", ev[0])                  # electric cyan on the spoken word
         self.assertIn(r"\fscx118", ev[0])                   # the pop
         self.assertIn("&H0000F2FF&", ev[4])                  # neon yellow for the number
-        self.assertTrue(all("\pos(540," in e for e in ev))
+        self.assertTrue(all(r"\pos(540," in e for e in ev))
 
     def test_profanity_masked_and_inside_safe_zone(self):
         text = "\n".join(pop_caption_events(self.words, 0.0, 10.0))
         self.assertNotIn("FUCK", text)
         self.assertIn("F***", text)
-        y = int(next(e for e in pop_caption_events(self.words, 0.0, 10.0, y=1700).__iter__()).split("\pos(540,")[1].split(")")[0])
+        y = int(next(e for e in pop_caption_events(self.words, 0.0, 10.0, y=1700).__iter__()).split(r"\pos(540,")[1].split(")")[0])
         self.assertLess(y, SAFE_BOTTOM)
 
     def test_hindi_uses_devanagari_font_style_size(self):
@@ -123,3 +123,69 @@ class BucketTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PictureFilterTests(unittest.TestCase):
+    def test_web_page_screenshots_are_rejected_but_art_is_kept(self):
+        import cv2
+        import numpy as np
+        from clipper import newsimage, imagesearch
+        page = np.full((900, 1600, 3), 245, np.uint8)
+        cv2.putText(page, "Choose a subscription", (100, 200), cv2.FONT_HERSHEY_SIMPLEX, 3, (30, 30, 30), 6)
+        art = np.zeros((900, 1600, 3), np.uint8)
+        art[..., 0], art[..., 1], art[..., 2] = np.linspace(0, 255, 1600), 80, np.linspace(255, 0, 900)[:, None]
+        bright_art = np.full((900, 1600, 3), (230, 160, 40), np.uint8)       # bright but colourful
+        self.assertTrue(newsimage.looks_like_web_page(page))
+        self.assertFalse(newsimage.looks_like_web_page(art))
+        self.assertFalse(newsimage.looks_like_web_page(bright_art))
+        data = cv2.imencode(".jpg", page)[1].tobytes()
+        self.assertIsNone(newsimage.save_picture(data, __import__("pathlib").Path("unused.jpg")))
+        self.assertTrue(imagesearch.looks_like_ui("PlayStation Plus subscription pricing"))
+        self.assertTrue(imagesearch.looks_like_ui("PS Plus logo"))
+        self.assertFalse(imagesearch.looks_like_ui("Nioh 3 screenshot boss fight"))
+
+
+class CuriosityHookTests(unittest.TestCase):
+    def test_curiosity_hooks_outscore_plain_headline_hooks(self):
+        plain = score_hook("Nioh 3 DLC 2 just got a new date", ["Nioh 3"])
+        curious = score_hook("Stop scrolling if you play Nioh 3", ["Nioh 3"])
+        self.assertEqual(plain.parts["curiosity"], 0.0)
+        self.assertGreater(curious.total, plain.total)
+        self.assertLessEqual(plain.total, 7.0)
+
+
+class EightToTenPicturesTests(unittest.TestCase):
+    def test_one_cut_per_picture_when_there_are_enough_pictures(self):
+        from clipper import news_render
+        for total, n in ((36.97, 10), (36.97, 9), (36.0, 8), (30.5, 8)):
+            segs = news_render.plan_segments(total, n)
+            self.assertEqual([i for i, _ in segs], list(range(n)), (total, n))          # every picture once, none repeats
+            self.assertTrue(all(2.5 <= s <= 4.5 for _, s in segs))
+        self.assertGreater(len(news_render.plan_segments(36.97, 4)), 4)                   # too few pictures: cycles as before
+
+    def test_defaults_ask_for_eight_to_ten_pictures(self):
+        from clipper.config import load_config
+        n = load_config().news
+        self.assertEqual((n["images_min"], n["images_max"]), (8, 10))
+
+
+class DeferredNameHookTests(unittest.TestCase):
+    subjects = ["Fortnite"]
+
+    def test_curiosity_gap_without_the_name_beats_a_dry_headline(self):
+        gap = score_hook("One streamer just broke a record nobody thought was possible", self.subjects)
+        dry = score_hook("Fortnite just got a new update today", self.subjects)
+        self.assertGreater(gap.total, dry.total)
+        self.assertIn("withheld on purpose", " ".join(gap.reasons))
+
+    def test_a_nameless_hook_without_a_real_gap_is_still_penalised(self):
+        weak = score_hook("This just changed everything for gamers", self.subjects)
+        self.assertEqual(weak.parts["name_early"], 0.0)
+
+    def test_name_starting_in_the_first_six_words_counts_as_early(self):
+        self.assertEqual(score_hook("Stop scrolling if you play Fortnite Chapter 7", ["Fortnite Chapter 7"]).parts["name_early"], 4.0)
+
+    def test_names_subject(self):
+        from clipper.hookscore import names_subject
+        self.assertTrue(names_subject("Epic gave Fortnite players a record", self.subjects))
+        self.assertFalse(names_subject("One streamer broke a record", self.subjects))

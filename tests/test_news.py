@@ -47,8 +47,8 @@ class HookScoreTests(unittest.TestCase):
     def test_perfect_hook(self):
         s = score_hook("Free on Epic today: Alan Wake 2 costs nothing", ["Alan Wake 2"])
         self.assertTrue(s.valid)
-        self.assertEqual(s.parts, {"name_early": 4.0, "urgency_early": 3.0, "specific": 1.5, "length": 1.5})
-        self.assertEqual(s.total, 10.0)
+        self.assertEqual(s.parts, {"name_early": 4.0, "urgency_early": 3.0, "specific": 1.5, "length": 1.5, "curiosity": 0.0})
+        self.assertEqual(s.total, 7.0)                                   # a plain headline hook tops out at 7
 
     def test_name_and_urgency_must_be_in_first_six_words(self):
         early = score_hook("GTA 6 leak shows a new Vice City map", ["GTA 6"])
