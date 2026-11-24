@@ -42,7 +42,7 @@ class EditorTests(unittest.TestCase):
 
     def test_edit_clip_never_raises_and_marks_failed(self):
         cfg = load_config()
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             tmp = Path(tmp)
             cfg.database = tmp / "c.sqlite"
             folder = tmp / "twitch-x-1"
