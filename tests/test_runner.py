@@ -72,6 +72,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_run_writes_heartbeat_then_cleans_up(self):
         cfg = load_config()
+        cfg.raw = {**cfg.raw, "news": {"auto_run": False}}      # never start the real news scheduler in a test
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             cfg.data_dir = Path(tmp)
             pool = mock.Mock()

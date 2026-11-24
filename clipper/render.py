@@ -39,7 +39,7 @@ CAM_MIN_HITS = 3                   # ...in at least this many sampled frames, al
 CAM_MIN_HIT_RATIO = 0.12           # ...and in at least this share of them (streamers turn away a lot)
 FONT_DIRS = "C:/Windows/Fonts"
 
-_ENCODER_ARGS = {
+ENCODER_ARGS = {
     "h264_nvenc": ["-preset", "p5", "-b:v", "10M", "-maxrate", "14M", "-bufsize", "20M"],
     "h264_qsv": ["-preset", "medium", "-b:v", "10M", "-maxrate", "14M", "-bufsize", "20M"],
     "h264_amf": ["-quality", "quality", "-b:v", "10M", "-maxrate", "14M", "-bufsize", "20M"],
@@ -259,22 +259,35 @@ def _fp(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/").replace(":", "\\:")
 
 
-def build_filter(layout: str, src_wh: tuple[int, int], cam: dict | None, ass: Path) -> str:
+def build_filter(layout: str, src_wh: tuple[int, int], cam: dict | None, ass: Path,
+                 wm: tuple[str, str] | None = None) -> str:
+    """Filter graph, input 0 = the video. wm = (chain ending in [wm], 'overlay=x:y') when input 1 is the
+    watermark PNG: it is laid over the picture BEFORE the captions, so captions always sit on top of it."""
     fw, fh = src_wh
     sub = f"ass=filename='{_fp(ass)}':fontsdir='{_fp(Path(FONT_DIRS))}'"
+    tail = f"[vs];{wm[0]};[vs][wm]{wm[1]},{sub},format=yuv420p[v]" if wm else f",{sub},format=yuv420p[v]"
     if layout == "stack" and cam:
         cw, ch, cx, cy = facecam_crop(cam)
         gw, gh, gx, gy = gameplay_crop(fw, fh)
         return (f"[0:v]split=2[a][b];"
                 f"[a]crop={cw}:{ch}:{cx}:{cy},scale={W}:{TOP_H}:flags=lanczos[top];"
                 f"[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{BOTTOM_H}:flags=lanczos[bot];"
-                f"[top][bot]vstack=inputs=2,drawbox=x=0:y={TOP_H - DIVIDER // 2}:w={W}:h={DIVIDER}:color=white@0.95:t=fill,"
-                f"{sub},format=yuv420p[v]")
+                f"[top][bot]vstack=inputs=2,drawbox=x=0:y={TOP_H - DIVIDER // 2}:w={W}:h={DIVIDER}:color=white@0.95:t=fill"
+                + tail)
     return (f"[0:v]split=2[a][b];"
             f"[a]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,gblur=sigma=6,"
             f"eq=brightness=-0.08:saturation=1.1,scale={W}:{H}:flags=bicubic[bg];"
             f"[b]scale={W}:-2:flags=lanczos[fg];"
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,{sub},format=yuv420p[v]")
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2" + tail)
+
+
+def watermark_parts(cfg: Config, index: int = 1) -> tuple[Path, tuple[str, str]] | None:
+    """(png, (chain, overlay)) for the channel watermark (ffmpeg input number `index`), or None when disabled."""
+    from . import watermark
+    png = watermark.ensure_watermark(cfg)
+    if not png:
+        return None
+    return png, (watermark.overlay_filter(cfg, index), watermark.overlay_position(cfg, SAFE_BOTTOM, W))
 
 
 # ------------------------------------------------------------------ audio
@@ -311,6 +324,21 @@ def loudness_after(cfg: Config, source: Path, start: float, dur: float, chain: s
                                "-af", f"{chain},ebur128=framelog=quiet", "-f", "null", "-"])
     m = re.findall(r"\bI:\s+(-?\d+(?:\.\d+)?) LUFS", out)
     return float(m[-1]) if m else None
+
+
+def audio_chain(cfg: Config, source: Path, start: float, dur: float) -> str:
+    """The -af chain that brings source[start:start+dur] to -14 LUFS (measured, then corrected for the limiter)."""
+    measured = measure_loudness(cfg, source, start, dur)
+    af = audio_filter(measured)
+    if measured:  # the limiter eats some loudness on peaky audio: measure the result, correct once
+        gain = TARGET_LUFS - measured["input_i"]
+        for _ in range(3):
+            got = loudness_after(cfg, source, start, dur, gain_chain(gain))
+            if got is None or abs(got - TARGET_LUFS) <= 0.2:
+                break
+            gain += TARGET_LUFS - got
+            af = gain_chain(gain)
+    return af
 
 
 def has_audio(cfg: Config, source: Path) -> bool:
@@ -355,28 +383,23 @@ def render_video(cfg: Config, folder: Path, layout: str = "auto") -> dict:
     words = payload.get("transcript", {}).get("words", [])
     ass = folder / "captions.ass"
     ass.write_text(build_ass(analysis, words, start, end, used, stream_lang(payload)), encoding="utf-8")
-    graph = build_filter(used, src_wh, cam, ass)
+    wm = watermark_parts(cfg)
+    graph = build_filter(used, src_wh, cam, ass, wm[1] if wm else None)
 
     encoder = pick_encoder(cfg)
     audio = has_audio(cfg, source)
-    args = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", source, "-filter_complex", graph, "-map", "[v]"]
+    args = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", source]
+    if wm:
+        args += ["-i", wm[0]]                         # input 1: the watermark PNG (one frame, held for the whole clip)
+    args += ["-filter_complex", graph, "-map", "[v]"]
     if audio:
-        measured = measure_loudness(cfg, source, start, dur)
-        af = audio_filter(measured)
-        if measured:  # the limiter eats some loudness on peaky audio: measure the result, correct once
-            gain = TARGET_LUFS - measured["input_i"]
-            for _ in range(3):
-                got = loudness_after(cfg, source, start, dur, gain_chain(gain))
-                if got is None or abs(got - TARGET_LUFS) <= 0.2:
-                    break
-                gain += TARGET_LUFS - got
-                af = gain_chain(gain)
+        af = audio_chain(cfg, source, start, dur)
         args += ["-map", "0:a:0", "-af", af,
                  "-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
     else:
         args += ["-an"]
     meta = f"{analysis['title']}"
-    args += ["-r", "30", "-c:v", encoder, *_ENCODER_ARGS[encoder], "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+    args += ["-r", "30", "-c:v", encoder, *ENCODER_ARGS[encoder], "-pix_fmt", "yuv420p", "-movflags", "+faststart",
              "-metadata", f"title={meta}", "-metadata", f"description={analysis['description_full']}",
              "-metadata", f"comment={credit}"]
     out = folder / "clip.mp4"
@@ -410,6 +433,8 @@ def render_clip(cfg: Config, folder: Path, layout: str = "auto") -> str:
         record_files(cfg.database, name, folder)
         from .notify import notify_rendered  # toast for banger / high-score clips; never raises
         notify_rendered(cfg, name)
+        from .routing import assign_routes  # advisory platform/slot targets; never raises
+        assign_routes(cfg)
         return "rendered"
     except Exception as exc:
         log.error("[%s] render failed: %s", name, exc)

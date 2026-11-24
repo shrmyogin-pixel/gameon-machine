@@ -59,6 +59,11 @@ EXTRA_COLUMNS = {
     "updated_at": "TEXT",
     "exported_at": "TEXT",        # when `export` last packaged it (status stays 'approved' until you post it)
     "export_path": "TEXT",        # the exported .mp4
+    "source_url": "TEXT",         # news Shorts: the exact article URL
+    "route_platform": "TEXT",     # where this clip should be posted: youtube | tiktok | instagram | ...
+    "route_slot": "TEXT",         # YouTube best-of-best clips: the AEDT peak slot name
+    "route_at": "TEXT",           # next occurrence of that slot, Melbourne time (ISO)
+    "route_rank": "INTEGER",      # 1 = best of the pending queue
 }
 
 
@@ -84,12 +89,12 @@ def init_db(db_path: Path) -> None:
 
 def add_clip(db_path: Path, platform: str, handle: str, folder: str, *, stream: str | None = None,
              lang: str | None = None, moment_kind: str | None = None, moment_at: str | None = None,
-             pre_score: float | None = None) -> None:
+             pre_score: float | None = None, source_url: str | None = None) -> None:
     init_db(db_path)
     with connect(db_path) as conn:
         conn.execute("INSERT OR IGNORE INTO clips (platform, handle, folder, stream, lang, moment_kind, moment_at,"
-                     " pre_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                     (platform, handle, folder, stream, lang, moment_kind, moment_at, pre_score))
+                     " pre_score, source_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     (platform, handle, folder, stream, lang, moment_kind, moment_at, pre_score, source_url))
 
 
 def set_clip_status(db_path: Path, folder: str, status: str, error: str | None = None,
@@ -325,3 +330,55 @@ def mark_exported(db_path: Path, clip_id: int, export_path: Path) -> None:
     with connect(db_path) as conn:
         conn.execute("UPDATE clips SET exported_at = datetime('now'), export_path = ?, updated_at = datetime('now')"
                      " WHERE id = ?", (str(export_path), clip_id))
+
+
+# ------------------------------------------------------------------ volume + routing
+def count_accepted_since(db_path: Path, since_utc: str, news: bool | None = None) -> int:
+    """Clips made since `since_utc` ('YYYY-MM-DD HH:MM:SS', UTC) that were accepted (not skipped / failed / new).
+
+    news=True counts only platform 'news', False only live-stream clips, None both."""
+    sql = ("SELECT COUNT(*) AS n FROM clips WHERE created_at >= ? AND status IN "
+           "('edited', 'rendered', 'approved', 'rejected', 'posted')")
+    if news is True:
+        sql += " AND platform = 'news'"
+    elif news is False:
+        sql += " AND platform != 'news'"
+    with connect(db_path) as conn:
+        return conn.execute(sql, (since_utc,)).fetchone()["n"]
+
+
+def pending_for_routing(db_path: Path, since_utc: str) -> list[dict]:
+    """Clips that can still be routed: rendered or approved, made since `since_utc`."""
+    with connect(db_path) as conn:
+        rows = conn.execute("SELECT * FROM clips WHERE status IN ('rendered', 'approved') AND created_at >= ?"
+                            " ORDER BY id", (since_utc,)).fetchall()
+    return [row_to_dict(r) for r in rows]
+
+
+def set_route(db_path: Path, clip_id: int, platform: str | None, slot: str | None, at: str | None,
+              rank: int | None) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET route_platform = ?, route_slot = ?, route_at = ?, route_rank = ? WHERE id = ?",
+                     (platform, slot, at, rank, clip_id))
+
+
+def clip_by_folder(db_path: Path, folder: str) -> dict | None:
+    with connect(db_path) as conn:
+        row = conn.execute("SELECT * FROM clips WHERE folder = ?", (folder,)).fetchone()
+    return row_to_dict(row) if row else None
+
+
+def recent_news_titles(db_path: Path, since_utc: str) -> list[str]:
+    """Titles of news Shorts made since `since_utc` (failed ones excluded): what the channel just covered."""
+    with connect(db_path) as conn:
+        return [r["title"] for r in conn.execute(
+            "SELECT title FROM clips WHERE platform = 'news' AND title IS NOT NULL AND status != 'failed'"
+            " AND created_at >= ? ORDER BY id DESC", (since_utc,))]
+
+
+def news_urls_seen(db_path: Path) -> set[str]:
+    """Article URLs that already became a news Short (so the same story is never made twice).
+    A story whose Short failed is not counted, so the next run can try it again."""
+    with connect(db_path) as conn:
+        return {r["source_url"] for r in conn.execute(
+            "SELECT source_url FROM clips WHERE platform = 'news' AND source_url IS NOT NULL AND status != 'failed'")}

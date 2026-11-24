@@ -152,6 +152,21 @@ def check_files_and_data(cfg: Config) -> None:
         record(FAIL, "data folder + database", str(exc))
 
 
+def check_news_and_watermark(cfg: Config) -> None:
+    try:
+        import edge_tts  # noqa: F401
+        record(OK, "edge-tts (news voiceover)", "installed")
+    except ImportError:
+        record(WARN, "edge-tts (news voiceover)", "not installed; run: pip install -r requirements.txt")
+    record(OK if cfg.news_feeds else WARN, "news feeds", f"{len(cfg.news_feeds)} RSS feeds for `news`")
+    from .watermark import ensure_watermark, settings
+    if not settings(cfg)["enabled"]:
+        record(OK, "watermark", "disabled in config.toml")
+    else:
+        png = ensure_watermark(cfg)
+        record(OK if png else WARN, "watermark", str(png) if png else "assets/watermark.jpg missing or unreadable; clips render without it")
+
+
 def run_doctor(cfg: Config, deep: bool = False) -> int:
     print("gameon-clipper doctor\n")
     checks = [
@@ -161,6 +176,7 @@ def run_doctor(cfg: Config, deep: bool = False) -> int:
         lambda: check_whisper(cfg),
         lambda: check_claude(cfg, deep),
         lambda: check_files_and_data(cfg),
+        lambda: check_news_and_watermark(cfg),
     ]
     for check in checks:  # one broken check must not stop the others
         try:

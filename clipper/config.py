@@ -81,6 +81,23 @@ class Config:
         return {"enabled": True, "min_score": 8.0, "banger": True, **self.raw.get("notify", {})}
 
     @property
+    def volume(self) -> dict:
+        """~15 Shorts/day: news_per_day from the news runs, live_max_per_day from stream clips."""
+        return {"daily_target": 15, "news_per_day": 6, "live_max_per_day": 9, "live_cap_override_score": 9.0,
+                **self.raw.get("volume", {})}
+
+    @property
+    def news(self) -> dict:
+        return {"hours": 12, "stories": 2, "script_min_words": 80, "script_max_words": 105, "target_seconds": 35,
+                "voice": "en-US-AndrewNeural", "rate": "+6%", "groq_model": "whisper-large-v3-turbo",
+                "max_candidates": 40, "auto_run": False, "run_times": [], **self.raw.get("news", {})}
+
+    @property
+    def news_feeds(self) -> list[dict]:
+        """[[news.feeds]] if given, else the top-level [[feeds]] list."""
+        return self.raw.get("news", {}).get("feeds") or self.raw.get("feeds", [])
+
+    @property
     def render(self) -> dict:
         return {"max_renders": 1, **self.raw.get("render", {})}
 
@@ -120,3 +137,16 @@ def env_key_status(name: str = "GROQ_API_KEY") -> str:
     except OSError:
         pass
     return "set" if os.environ.get(name) else "not set"
+
+
+def get_env_key(name: str) -> str | None:
+    """The value of a key from .env or the environment, or None. The caller must never print or log it."""
+    try:
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith(f"{name}="):
+                value = line.split("=", 1)[1].strip().strip("\"'")
+                return value or None
+    except OSError:
+        pass
+    return os.environ.get(name) or None

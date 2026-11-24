@@ -37,6 +37,9 @@
   .badge.banger { background: #4a2a10; color: var(--fire); }
   .badge.sens { background: #5a1e20; color: #ff8a80; }
   .badge.clean { background: #1b3d2a; color: var(--ok); }
+  .badge.route-youtube { background: #4a1f1f; color: #ff9a8f; }
+  .badge.route-other { background: #1f3a4a; color: #8fd0ff; }
+  .badge.news { background: #2a2f55; color: #b4bcff; }
   .score { font-size: 22px; font-weight: 700; }
   .score small { font-size: 11px; font-weight: 400; color: var(--dim); }
   .who { color: var(--dim); font-size: 12px; }
@@ -232,10 +235,15 @@ function card(clip) {
     h("span", { class: "score" }, h("small", {}, num(clip.pre_score) + " pre-score")),
     status,
     clip.banger ? h("span", { class: "badge banger" }, "🔥 banger") : null,
+    clip.platform === "news" ? h("span", { class: "badge news" }, "news") : null,
+    clip.route_platform ? h("span", { class: "badge " + (clip.route_platform === "youtube" ? "route-youtube" : "route-other"),
+      title: clip.route_at || "" }, "→ " + clip.route_platform + (clip.route_slot ? " · " + clip.route_slot : "")) : null,
     clip.sensitive ? h("span", { class: "badge sens" }, "⚠ sensitive") : h("span", { class: "badge clean" }, "not sensitive")));
   root.append(h("div", { class: "who" },
     h("strong", {}, clip.handle), " · ", clip.platform, clip.lang ? " · " + clip.lang : "", " · ", clip.moment_kind || "",
-    h("br"), "spike " + fmtTime(clip.moment_at || clip.created_at),
+    h("br"), (clip.platform === "news" ? "made " : "spike ") + fmtTime(clip.moment_at || clip.created_at),
+    clip.source_url ? [h("br"), "source: ", h("a", { href: clip.source_url, target: "_blank", rel: "noopener noreferrer",
+      style: "color:#8fb4ff" }, clip.source_url)] : null,
     clip.clip_start_s !== null && clip.clip_end_s !== null ? ` · cut ${num(clip.clip_start_s)}s–${num(clip.clip_end_s)}s` : ""));
   if (clip.sensitive) root.append(h("div", { class: "warn" }, "Review carefully: " + (clip.sensitive_reason || "flagged by the AI editor")));
   if (clip.skip_reason) root.append(h("div", { class: "note" }, "Skipped: " + clip.skip_reason));

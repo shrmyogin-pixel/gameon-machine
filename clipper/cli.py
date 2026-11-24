@@ -45,6 +45,12 @@ def main(argv: list[str] | None = None) -> int:
     ex.add_argument("--all", action="store_true", help="re-export every approved clip, even ones exported before")
     ex.add_argument("--id", type=int, action="append", metavar="ID", help="export this clip id (repeatable; re-exports)")
     ex.add_argument("--dry-run", action="store_true", help="show what would be exported, copy nothing")
+    nw = sub.add_parser("news", help="Breaking News Engine: make news Shorts from the RSS feeds")
+    nw.add_argument("--hours", type=float, help="only stories newer than this (default [news] hours = 12)")
+    nw.add_argument("--count", type=int, help="how many stories to make (default [news] stories = 2)")
+    nw.add_argument("--dry-run", action="store_true", help="pick stories and write scripts only: no voice, video or database rows")
+    sub.add_parser("route", help="show / refresh the platform + peak-slot routing of the pending clips")
+    sub.add_parser("watermark", help="(re)build assets/watermark.png from assets/watermark.jpg")
     rv = sub.add_parser("review", help="start the local review dashboard (http://127.0.0.1:8765, localhost only)")
     rv.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
     rv.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
@@ -164,6 +170,64 @@ def main(argv: list[str] | None = None) -> int:
                       + (f"  Folder: {mp4.parent}" if res.exported else ""))
                 print("Nothing was uploaded: post these by hand, then press 'Mark Posted' in the review dashboard.")
             return 0 if res.ok else 1
+        if args.command == "news":
+            import logging
+
+            from .news import run_news
+
+            try:
+                sys.stdout.reconfigure(errors="replace")
+            except Exception:
+                pass
+            console = logging.StreamHandler()
+            console.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%H:%M:%S"))
+            log.addHandler(console)
+            print("Reading feeds, asking Claude to pick the stories (this takes a minute)...")
+            res = run_news(cfg, args.hours, args.count, args.dry_run)
+            if res.note:
+                print(res.note)
+            for p in res.picked:
+                print(f"\n[{p.kind}] {p.story.outlet}: {p.story.title}\n  {p.story.link}")
+                print(f"  score {p.score:g} | hook ({p.hook.total:g}/10): {p.hook.hook}")
+                for h in p.hooks:
+                    print(f"     {h.total:4.1f}  {h.hook}" + ("" if h.valid else f"   [INVALID: {'; '.join(h.reasons)}]"))
+                print(f"  script ({len(p.script.split())} words): {p.script}")
+            for p, folder in res.made:
+                print(f"  MADE: {folder}")
+            for p, why in res.failed:
+                print(f"  FAILED: {p.story.title[:60]}: {why}")
+            if args.dry_run:
+                print("\nDry run: nothing was voiced, rendered or saved.")
+            elif res.made:
+                print(f"\n{len(res.made)} news Short(s) ready. Review them with: python -m clipper review")
+            print("Nothing was uploaded.")
+            return 0 if (res.made or (args.dry_run and res.picked) or (not res.failed and not res.note.startswith("run failed"))) else 1
+        if args.command == "route":
+            from .routing import assign_routes
+
+            routes = assign_routes(cfg)
+            from . import db
+            clips = {c["id"]: c for c in db.list_clips(cfg.database, limit=1000)}
+            if not routes:
+                print("No rendered or approved clips in the routing window.")
+            for cid, r in sorted(routes.items(), key=lambda kv: kv[1]["rank"] or 999):
+                c = clips.get(cid, {})
+                where = f"YOUTUBE  {r['slot']}  {r['at']}" if r["platform"] == "youtube" else r["platform"].upper()
+                print(f"  #{r['rank']:<3} id {cid:<4} {c.get('platform', ''):<8} {c.get('handle', ''):<18} "
+                      f"score {c.get('ai_score') if c.get('ai_score') is not None else '-':<4} -> {where}")
+            return 0
+        if args.command == "watermark":
+            from .watermark import build_watermark, find_source, settings
+            from .config import expand_path
+
+            s = settings(cfg)
+            src = find_source(expand_path(str(s["source"])))
+            if not src:
+                print(f"Source image not found: {s['source']}")
+                return 1
+            out = build_watermark(src, expand_path(str(s["file"])))
+            print(f"Wrote {out}")
+            return 0
         if args.command == "review":
             from .review import run_review
 

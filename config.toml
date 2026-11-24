@@ -49,14 +49,51 @@ workers = 2                 # clipper workers running at the same time (whisper 
 
 [ai]
 model = "sonnet"            # headless Claude editor (claude -p --model ...)
-min_score = 6               # normal mode: clips scoring below this are skipped
-launch_mode = true          # channel-launch mode: use launch_min_score instead, so more clips get through
+min_score = 5               # normal mode: clips scoring below this are skipped
+launch_mode = false         # true = channel-launch mode: use launch_min_score instead (more clips get through)
 launch_min_score = 4
 timeout_seconds = 240       # per Claude call
 retries = 1                 # extra attempts when the reply is not valid JSON / exit code != 0
 
 [render]
 max_renders = 1             # video renders running at the same time (1 keeps the PC usable)
+
+# ---- ~15 Shorts a day: ~9 from live streams + ~6 news Shorts (3 news runs x 2 stories) ----
+# A starting point: check `python -m clipper status` after a few days and adjust.
+[volume]
+daily_target = 15
+news_per_day = 6
+live_max_per_day = 9               # once this many live clips were accepted today (Melbourne day), weaker ones are skipped
+live_cap_override_score = 9        # ...but a banger or a score >= this always gets through
+
+# ---- Platform routing: top clips -> YouTube (one per peak slot below), the rest -> other platforms ----
+[routing]
+youtube_top = 3                    # best-of-best clips/Shorts sent to YouTube (2-3), one per [[slots]] entry in order
+other_platforms = ["tiktok", "instagram", "facebook"]
+window_hours = 36                  # clips made in this window compete for the slots
+news_bonus = 0.5                   # ranking nudge for news Shorts
+
+# ---- Channel watermark (assets/watermark.jpg -> assets/watermark.png, built automatically) ----
+[watermark]
+enabled = true
+opacity = 0.40
+width = 170                        # pixels on the 1080x1920 frame
+margin = 36
+corner = "left"                    # "left" or "right"; bottom, above the y=1450 safe-zone line
+
+# ---- Breaking News Engine: python -m clipper news (feeds come from the [[feeds]] list below) ----
+[news]
+hours = 12                         # only stories newer than this
+stories = 2                        # news Shorts per run
+script_min_words = 80
+script_max_words = 105             # ~35 seconds spoken
+target_seconds = 35
+voice = "en-US-AndrewNeural"       # edge-tts voice
+rate = "+6%"
+groq_model = "whisper-large-v3-turbo"   # word timestamps (GROQ_API_KEY in .env)
+max_candidates = 40                # newest headlines shown to Claude
+auto_run = true                    # `run` / run.bat also makes news Shorts at the times below
+run_times = ["07:30", "13:30", "19:30"]   # local (Melbourne) time
 
 [notify]
 enabled = true              # Windows toast when a strong clip finishes rendering (falls back to a console beep + log)

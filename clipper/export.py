@@ -133,6 +133,13 @@ def build_sheet(clip: dict, folder: Path, mp4_name: str, thumb_name: str | None)
              f"Streamer:    {clip['handle']} ({clip['platform']})", f"Clip id:     {clip['id']}"]
     if clip.get("ai_score") is not None:
         notes.append(f"AI score:    {clip['ai_score']:g}/10" + ("  (banger)" if clip.get("banger") else ""))
+    if clip.get("route_platform"):
+        where = clip["route_platform"].upper()
+        if clip.get("route_slot"):
+            where += f" - {clip['route_slot']} ({clip.get('route_at')})"
+        notes.append(f"Route:       {where}  (rank #{clip.get('route_rank')})")
+    if clip.get("source_url"):
+        notes.append(f"Source URL:  {clip['source_url']}")
     if clip.get("sensitive"):
         notes.append(f"REVIEW NOTE: flagged sensitive by the AI editor: {mask(clip.get('sensitive_reason') or '')}")
     return "\n".join([
@@ -215,6 +222,8 @@ def run_export(cfg: Config, include_all: bool = False, ids: list[int] | None = N
     if cfg.raw.get("general", {}).get("autopost", False):
         log.warning("config has autopost=true; ignored - this tool never uploads")
     db.init_db(cfg.database)
+    from .routing import assign_routes
+    assign_routes(cfg)                                       # so every sheet says where the clip should go
     clips = db.clips_to_export(cfg.database, include_all, ids)
     found = {c["id"] for c in clips}
     result = Result()

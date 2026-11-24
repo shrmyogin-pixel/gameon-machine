@@ -205,7 +205,18 @@ def validate(reply: str, duration: float, credit: str, streamer: str, link: str)
     return out
 
 
-def decide(cfg: Config, result: dict) -> tuple[str, str | None]:
+def live_cap_reached(cfg: Config, result: dict) -> bool:
+    """True when today's live-clip quota is full and this clip is not strong enough to jump the queue."""
+    from .db import count_accepted_since
+    from .routing import day_start_utc
+    v = cfg.volume
+    cap = int(v["live_max_per_day"])
+    if cap <= 0 or result["banger"] or result["score"] >= float(v["live_cap_override_score"]):
+        return False
+    return count_accepted_since(cfg.database, day_start_utc(cfg), news=False) >= cap
+
+
+def decide(cfg: Config, result: dict, capped: bool = False) -> tuple[str, str | None]:
     """-> (status, skip_reason). status is 'edited' (worth exporting) or 'skipped'."""
     ai = cfg.ai
     threshold = float(ai["launch_min_score"] if ai["launch_mode"] else ai["min_score"])
@@ -213,6 +224,9 @@ def decide(cfg: Config, result: dict) -> tuple[str, str | None]:
         return "skipped", f"editor said no: {result['reason']}"[:300]
     if result["score"] < threshold:
         return "skipped", f"score {result['score']:g} below min {threshold:g}"
+    if capped:
+        return "skipped", (f"daily live quota ({cfg.volume['live_max_per_day']}) full and score {result['score']:g}"
+                           f" is below {float(cfg.volume['live_cap_override_score']):g}")
     return "edited", None
 
 
@@ -242,7 +256,7 @@ def edit_clip(cfg: Config, folder: Path) -> str:
                 prompt = base + RETRY_NOTE.format(why=last)
         else:
             raise EditorError(last)
-        status, reason = decide(cfg, result)
+        status, reason = decide(cfg, result, live_cap_reached(cfg, result))
         result.update(status=status, skip_reason=reason, model=cfg.ai["model"], autopost=False,
                       needs_human_review=bool(result["sensitive"]))
         (folder / "analysis.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
