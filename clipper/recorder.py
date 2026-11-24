@@ -106,6 +106,7 @@ class Recorder(threading.Thread):
         sl = ff = None
         sl_log = ff_log = None
         chat = None
+        monitor = mon_stop = None
         reason = "error"
         try:
             sl_log = (session_dir / "streamlink.log").open("wb")
@@ -116,6 +117,7 @@ class Recorder(threading.Thread):
                                   stderr=ff_log, creationflags=_flags(self.cfg.raw["encoding"].get("below_normal_priority", True)))
             sl.stdout.close()  # ffmpeg owns the pipe now, so it sees end-of-stream when streamlink exits
             chat = self._start_chat(session_dir)
+            monitor, mon_stop = self._start_monitor(session_dir, started, chat)
             last_clean = time.monotonic()
             while not self.stop_event.is_set() and ff.poll() is None:
                 self.stop_event.wait(2)
@@ -134,6 +136,9 @@ class Recorder(threading.Thread):
                 except Exception:
                     log.exception("[%s] could not stop chat capture", self.name_)
             self._shutdown(sl, ff)
+            if monitor is not None:  # after ffmpeg is done, so the last segment is complete
+                mon_stop.set()
+                monitor.join(timeout=60)
             for f in (sl_log, ff_log):
                 if f:
                     f.close()
@@ -153,6 +158,23 @@ class Recorder(threading.Thread):
         except Exception:
             log.exception("[%s] could not start chat capture; recording continues without chat", self.name_)
             return None
+
+    def _start_monitor(self, session_dir: Path, started: datetime, chat):
+        """Spike detection (chat + audio). Failure here must never affect recording."""
+        try:
+            from .detect import SpikeMonitor, build_params
+
+            params = build_params(self.cfg.raw.get("detect"), self.stream)
+            stop = threading.Event()
+            mon = SpikeMonitor(session_dir, self.name_, params, self.ffmpeg_exe, started.timestamp(), stop,
+                               chat_alive=lambda: chat is not None and chat.is_alive(),
+                               segment_seconds=self.opts["segment_seconds"],
+                               low_priority=self.cfg.raw["encoding"].get("below_normal_priority", True))
+            mon.start()
+            return mon, stop
+        except Exception:
+            log.exception("[%s] could not start spike detection; recording continues", self.name_)
+            return None, None
 
     def _shutdown(self, sl, ff) -> None:
         """Stop streamlink first; ffmpeg then finishes its last segment on its own."""

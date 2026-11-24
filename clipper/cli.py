@@ -23,6 +23,9 @@ def main(argv: list[str] | None = None) -> int:
     t = sub.add_parser("test-chat", help="read a stream's chat anonymously and print messages/sec per 5s")
     t.add_argument("link", help="Twitch, YouTube or Kick stream link")
     t.add_argument("--seconds", type=int, default=120, help="how long to listen (default 120)")
+    r = sub.add_parser("detect-replay", help="run spike detection over a saved session folder (tuning/testing)")
+    r.add_argument("session", help="session folder, e.g. data/sessions/twitch-lacy/20260101-120000")
+    r.add_argument("--no-audio", action="store_true", help="chat only (skip decoding audio)")
     args = parser.parse_args(argv)
 
     try:
@@ -69,6 +72,23 @@ def main(argv: list[str] | None = None) -> int:
             console.setFormatter(logging.Formatter("  ! %(message)s"))
             log.addHandler(console)
             return run_test_chat(args.link, args.seconds, cfg.sessions_dir)
+        if args.command == "detect-replay":
+            from pathlib import Path
+
+            from .detect import build_params, replay
+
+            folder = Path(args.session).expanduser().resolve()
+            if not (folder / "chat.jsonl").is_file() and not any(folder.glob("seg_*.ts")):
+                print(f"No chat.jsonl or segments in {folder}")
+                return 1
+            name = folder.parent.name
+            stream = next((s for s in cfg.streams if f"{s['platform']}-{s['handle']}".lower() == name), None)
+            moments = replay(folder, name, build_params(cfg.raw.get("detect"), stream), cfg.ffmpeg,
+                             with_audio=not args.no_audio)
+            for m in moments:
+                print(m.describe())
+            print(f"{len(moments)} moment(s)")
+            return 0
     except Exception:
         log.exception("command %s crashed", args.command)
         print("Something went wrong; details are in data/logs/clipper.log")

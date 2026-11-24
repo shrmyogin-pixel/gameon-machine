@@ -56,12 +56,58 @@ time = "00:00"
 name = "Slot 3 - Global Peak"
 time = "02:00"
 
+[detect]
+# --- Chat spikes: a 5-second bucket is a spike only when ALL four tests pass ---
+bucket_seconds = 5
+baseline_buckets = 60            # rolling baseline = last 60 buckets (5 minutes)
+warmup_buckets = 12              # never fire during the first 12 buckets of a session
+std_multiplier = 2.5             # count >= mean + 2.5 x standard deviation
+median_multiplier = 2.0          # count >= 2.0 x median
+min_messages = 10                # count >= this (override per stream)
+min_unique_ratio = 0.5           # unique chatters / messages >= 0.5
+max_per_user = 2                 # count at most this many messages per user per bucket
+cooldown_seconds = 90            # after a moment, that stream stays quiet this long
+ignore_prefix = "!"              # ignore bot commands like !discord
+ignore_users = ["nightbot", "streamelements", "moobot", "fossabot", "wizebot", "streamlabs", "soundalerts", "sery_bot"]
+# --- Audio loudness (measured every second from the recording) ---
+audio_enabled = true
+audio_baseline_seconds = 300     # rolling baseline for the loudness z-score
+audio_warmup_seconds = 30        # need this much audio before z-scores count
+audio_min_std_db = 1.5           # floor on the baseline spread, so quiet streams don't blow up z
+audio_alone_z = 3.5              # no chat reader: z >= this ...
+audio_alone_hold_seconds = 2     # ... held this many seconds = a moment
+audio_boost_z = 1.5              # chat spike + audio z >= this scores higher
+
+# --- 0-10 pre-score = sum of weighted parts (each part is 0..1) ---
+[detect.score]
+weight_chat = 3.5                # how far the spike is above normal (chat z / chat_z_full)
+weight_unique = 2.0              # how many different people (unique / unique_full)
+weight_words = 2.0               # laugh / shock / hype words (messages with them / words_full)
+weight_audio = 2.5               # loud audio (only counts at z >= audio_boost_z)
+chat_z_full = 8.0
+unique_full = 30
+words_full = 5
+audio_z_full = 4.0
+audio_alone_base = 3.0           # audio-only moments (no chat) score 3 .. 8
+audio_alone_span = 5.0
+audio_alone_z_span = 4.0
+
+# --- Words that raise the pre-score (case-insensitive, whole words) ---
+[detect.words]
+laugh = ["lol", "lmao", "lmfao", "rofl", "haha", "hahaha", "kekw", "omegalul", "lul", "icant", "dead", "😂", "🤣", "💀"]
+shock = ["omg", "wtf", "wow", "no way", "holy", "insane", "bruh", "what", "clip it", "clip that", "cooked", "😱", "😳", "🤯"]
+hype = ["pog", "poggers", "pogchamp", "pogu", "let's go", "lets go", "gg", "hype", "w", "clutch", "goated", "sheesh", "waah", "gajab", "ghazab", "mast", "🔥", "🙌"]
+
+# Any stream below can override min_messages (and any other flat [detect] number),
+# e.g.  min_messages = 6   or a table  [streams.detect]  with extra keys.
+
 # ---- Live streams to watch ----
 [[streams]]
 platform = "twitch"
 handle = "lacy"
 url = "https://www.twitch.tv/lacy"
 lang = "en"
+min_messages = 10          # per-stream override of [detect] min_messages
 
 [[streams]]
 platform = "youtube"

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 
 from . import Emit, backoff_sleep
 
@@ -41,16 +42,20 @@ async def read(channel: str, emit: Emit, stop: asyncio.Event) -> None:
         try:
             reader, writer = await asyncio.wait_for(asyncio.open_connection(HOST, PORT), 15)
             nick = f"justinfan{random.randint(10000, 99999)}"
-            writer.write(
-                f"CAP REQ :twitch.tv/tags\r\nPASS SCHMOOPIIE\r\nNICK {nick}\r\nJOIN #{channel}\r\n".encode()
-            )
+            # Twitch silently ignores JOIN if it arrives before login finishes, so log in first
+            # and send CAP + JOIN only after the "001" welcome line.
+            writer.write(f"PASS SCHMOOPIIE\r\nNICK {nick}\r\n".encode())
             await writer.drain()
-            log.info("twitch chat: joined #%s as %s", channel, nick)
+            joined = False
+            join_deadline = time.monotonic() + 15
+            log.info("twitch chat: logging in to #%s as %s", channel, nick)
             buf = b""
             while not stop.is_set():
                 try:
                     chunk = await asyncio.wait_for(reader.read(8192), timeout=1.0)
                 except asyncio.TimeoutError:
+                    if not joined and time.monotonic() > join_deadline:
+                        raise ConnectionError("no welcome from Twitch")
                     continue
                 if not chunk:
                     raise ConnectionError("server closed the connection")
@@ -59,7 +64,12 @@ async def read(channel: str, emit: Emit, stop: asyncio.Event) -> None:
                 while b"\r\n" in buf:
                     raw, buf = buf.split(b"\r\n", 1)
                     line = raw.decode("utf-8", errors="replace")
-                    if line.startswith("PING"):
+                    if not joined and " 001 " in line:
+                        writer.write(f"CAP REQ :twitch.tv/tags\r\nJOIN #{channel}\r\n".encode())
+                        await writer.drain()
+                        joined = True
+                        log.info("twitch chat: joined #%s", channel)
+                    elif line.startswith("PING"):
                         writer.write(b"PONG" + line[4:].encode("utf-8") + b"\r\n")
                         await writer.drain()
                     elif line.endswith("RECONNECT") or " RECONNECT" in line:
