@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from .config import Config
-from .db import set_clip_status
+from .db import record_analysis, set_clip_status
 from .profanity import mask
 from .proc import BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW
 
@@ -247,6 +247,7 @@ def edit_clip(cfg: Config, folder: Path) -> str:
                       needs_human_review=bool(result["sensitive"]))
         (folder / "analysis.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         set_clip_status(cfg.database, name, status, None, reason)
+        record_analysis(cfg.database, name, result, folder / "analysis.json")
         log.info("[%s] editor: %s score=%g%s%s", name, status, result["score"],
                  " SENSITIVE-review" if result["sensitive"] else "", f" ({reason})" if reason else "")
         return status

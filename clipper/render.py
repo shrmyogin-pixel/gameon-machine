@@ -18,7 +18,7 @@ import threading
 from pathlib import Path
 
 from .config import Config
-from .db import set_clip_status
+from .db import record_files, set_clip_status
 from .profanity import mask
 from .proc import run
 from .worker import probe_duration
@@ -199,9 +199,31 @@ def caption_groups(words: list, start: float, end: float, per: int = WORDS_PER_C
     return out
 
 
-def build_ass(analysis: dict, words: list, start: float, end: float, layout: str) -> str:
+def stream_lang(payload: dict) -> str:
+    """Language of the stream ('hi' for CarryMinati...), from config via payload.json; whisper's guess as backup."""
+    lang = payload.get("stream", {}).get("lang") or payload.get("transcript", {}).get("language") or "en"
+    return str(lang).lower().split("-")[0]
+
+
+# Devanagari needs a font that has the glyphs; Impact and Arial do not (boxes appear instead of Hindi).
+DEVANAGARI_LANGS = {"hi", "mr", "ne", "sa"}
+DEVANAGARI_FONTS = [("Nirmala UI", "Nirmala.ttf"), ("Nirmala UI", "Nirmala.ttc"), ("Mangal", "mangal.ttf")]
+
+
+def caption_fonts(lang: str, fonts_dir: Path | str = FONT_DIRS) -> dict:
+    """Font family for each ASS style. English keeps Impact/Arial; Hindi uses a Windows Devanagari font."""
+    if lang not in DEVANAGARI_LANGS:
+        return {"Hook": "Impact", "Cap": "Impact", "Meme": "Arial", "bold": 0, "cap_size": 100, "hook_size": 84}
+    family = next((fam for fam, f in DEVANAGARI_FONTS if (Path(fonts_dir) / f).is_file()), DEVANAGARI_FONTS[0][0])
+    # Nirmala UI is bold-capable and wider than Impact, so sizes come down a little
+    return {"Hook": family, "Cap": family, "Meme": family, "bold": -1, "cap_size": 84, "hook_size": 70}
+
+
+def build_ass(analysis: dict, words: list, start: float, end: float, layout: str, lang: str = "en",
+              fonts_dir: Path | str = FONT_DIRS) -> str:
     dur = end - start
     hook = _ass_text(mask(analysis["hook"]).upper())
+    f = caption_fonts(lang, fonts_dir)
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -211,9 +233,9 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,Impact,84,&H0000F0FF,&H000000FF,&H20000000,&H00000000,0,0,0,0,100,100,1,0,3,16,0,8,60,60,0,1
-Style: Cap,Impact,100,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,1,0,1,8,3,5,50,50,0,1
-Style: Meme,Arial,46,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,8,60,60,0,1
+Style: Hook,{f['Hook']},{f['hook_size']},&H0000F0FF,&H000000FF,&H20000000,&H00000000,{f['bold']},0,0,0,100,100,1,0,3,16,0,8,60,60,0,1
+Style: Cap,{f['Cap']},{f['cap_size']},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,{f['bold']},0,0,0,100,100,1,0,1,8,3,5,50,50,0,1
+Style: Meme,{f['Meme']},46,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,8,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -332,7 +354,7 @@ def render_video(cfg: Config, folder: Path, layout: str = "auto") -> dict:
     used = "stack" if cam else "blur"
     words = payload.get("transcript", {}).get("words", [])
     ass = folder / "captions.ass"
-    ass.write_text(build_ass(analysis, words, start, end, used), encoding="utf-8")
+    ass.write_text(build_ass(analysis, words, start, end, used, stream_lang(payload)), encoding="utf-8")
     graph = build_filter(used, src_wh, cam, ass)
 
     encoder = pick_encoder(cfg)
@@ -385,6 +407,7 @@ def render_clip(cfg: Config, folder: Path, layout: str = "auto") -> str:
         analysis["render"] = info
         (folder / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
         set_clip_status(cfg.database, name, "rendered")
+        record_files(cfg.database, name, folder)
         return "rendered"
     except Exception as exc:
         log.error("[%s] render failed: %s", name, exc)

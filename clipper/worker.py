@@ -247,7 +247,9 @@ def build_clip(cfg: Config, stream: dict, session_dir: Path, moment, segment_sec
     folder = None
     try:
         folder = _unique_folder(cfg, stream, moment.start_ts)
-        add_clip(cfg.database, stream["platform"], stream["handle"], folder.name)
+        add_clip(cfg.database, stream["platform"], stream["handle"], folder.name, stream=stream.get("url"),
+                 lang=stream.get("lang", "en"), moment_kind=moment.kind, pre_score=moment.prescore,
+                 moment_at=datetime.fromtimestamp(moment.start_ts).isoformat(timespec="seconds"))
         t0 = time.monotonic()
         source, src_start, src_end = build_source(cfg, session_dir, folder, moment.start_ts, segment_seconds)
         duration = probe_duration(cfg, source)

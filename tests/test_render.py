@@ -28,6 +28,27 @@ class RenderTests(unittest.TestCase):
             self.assertEqual("Line one" in ass, layout == "blur")
         self.assertLess(render.CAPTION_Y, render.SAFE_BOTTOM)
 
+    def test_hindi_clips_use_devanagari_font_not_impact(self):
+        hi = render.build_ass(ANALYSIS, WORDS, 10.0, 20.0, "blur", "hi")
+        self.assertNotIn("Impact", hi)
+        self.assertNotIn("Arial", hi)
+        styles = [l for l in hi.splitlines() if l.startswith("Style:")]
+        self.assertEqual(len(styles), 3)
+        self.assertTrue(all(l.split(",")[1] in ("Nirmala UI", "Mangal") for l in styles))
+        en = render.build_ass(ANALYSIS, WORDS, 10.0, 20.0, "blur", "en")
+        self.assertIn("Style: Cap,Impact,100", en)
+        self.assertEqual(render.stream_lang({"stream": {"lang": "hi"}}), "hi")
+        self.assertEqual(render.stream_lang({"transcript": {"language": "en-US"}}), "en")
+        self.assertEqual(render.stream_lang({}), "en")
+
+    def test_devanagari_font_falls_back_to_mangal_then_nirmala(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            self.assertEqual(render.caption_fonts("hi", tmp)["Cap"], "Nirmala UI")   # none installed: default name
+            (Path(tmp) / "mangal.ttf").write_bytes(b"x")
+            self.assertEqual(render.caption_fonts("hi", tmp)["Cap"], "Mangal")
+            (Path(tmp) / "Nirmala.ttf").write_bytes(b"x")
+            self.assertEqual(render.caption_fonts("hi", tmp)["Cap"], "Nirmala UI")
+
     def test_facecam_crop_stays_inside_frame_with_panel_aspect(self):
         for face in [(74, 357, 56, 56), (1091, 286, 72, 72), (0, 0, 40, 40), (1240, 680, 40, 40)]:
             cw, ch, cx, cy = render.facecam_crop({"face": face, "frame": (1280, 720)})

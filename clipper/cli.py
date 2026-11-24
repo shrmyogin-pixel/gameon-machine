@@ -35,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("folder", help="clip folder with payload.json, analysis.json and source.mp4")
     rd.add_argument("--layout", choices=["auto", "stack", "blur"], default="auto",
                     help="auto = facecam stack if a face is found in a corner, else blurred background")
+    rv = sub.add_parser("review", help="start the local review dashboard (http://127.0.0.1:8765, localhost only)")
+    rv.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
+    rv.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
     args = parser.parse_args(argv)
 
     try:
@@ -114,6 +117,10 @@ def main(argv: list[str] | None = None) -> int:
             status = render_clip(cfg, folder, args.layout)
             print(f"Render result: {status}  ({folder / 'clip.mp4'})")
             return 0 if status == "rendered" else 1
+        if args.command == "review":
+            from .review import run_review
+
+            return run_review(cfg, args.port, not args.no_browser)
         if args.command == "detect-replay":
             from pathlib import Path
 
