@@ -1,0 +1,93 @@
+"""Loads config.toml and .env. Every path is a pathlib.Path."""
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_FILE = PROJECT_ROOT / "config.toml"
+ENV_FILE = PROJECT_ROOT / ".env"
+
+
+def expand_path(value: str) -> Path:
+    """Turn '$HOME\\x', '~/x' or a relative path into an absolute Path."""
+    home = str(Path.home())
+    text = value.replace("$HOME", home).replace("%USERPROFILE%", home)
+    path = Path(os.path.expandvars(text)).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+@dataclass
+class Config:
+    raw: dict
+    data_dir: Path
+    database: Path
+    log_file: Path
+    clips_dir: Path
+    sessions_dir: Path
+    whisper_cli: Path
+    whisper_model_en: Path
+    whisper_model_multi: Path
+    ffmpeg: str
+    streamlink: str
+    claude: str
+
+    @property
+    def streams(self) -> list[dict]:
+        return self.raw.get("streams", [])
+
+    @property
+    def feeds(self) -> list[dict]:
+        return self.raw.get("feeds", [])
+
+    @property
+    def slots(self) -> list[dict]:
+        return self.raw.get("slots", [])
+
+    @property
+    def recorder(self) -> dict:
+        defaults = {
+            "check_interval_seconds": 60,
+            "segment_seconds": 10,
+            "keep_hours": 1,
+            "quality": "720p60,720p,best",
+            "twitch_low_latency": True,
+        }
+        return {**defaults, **self.raw.get("recorder", {})}
+
+
+def load_config(path: Path = CONFIG_FILE) -> Config:
+    with path.open("rb") as f:
+        raw = tomllib.load(f)
+    paths = raw.get("paths", {})
+    tools = raw.get("tools", {})
+    return Config(
+        raw=raw,
+        data_dir=expand_path(paths.get("data_dir", "data")),
+        database=expand_path(paths.get("database", "data/clips.sqlite")),
+        log_file=expand_path(paths.get("log_file", "data/logs/clipper.log")),
+        clips_dir=expand_path(paths.get("clips_dir", "data/clips")),
+        sessions_dir=expand_path(paths.get("sessions_dir", "data/sessions")),
+        whisper_cli=expand_path(tools["whisper_cli"]),
+        whisper_model_en=expand_path(tools["whisper_model_en"]),
+        whisper_model_multi=expand_path(tools["whisper_model_multi"]),
+        ffmpeg=tools.get("ffmpeg", "ffmpeg"),
+        streamlink=tools.get("streamlink", "streamlink"),
+        claude=tools.get("claude", "claude"),
+    )
+
+
+def env_key_status(name: str = "GROQ_API_KEY") -> str:
+    """Return 'set' or 'not set'. Never returns or logs the key itself."""
+    try:
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith(f"{name}="):
+                return "set" if line.split("=", 1)[1].strip().strip("\"'") else "not set"
+    except OSError:
+        pass
+    return "set" if os.environ.get(name) else "not set"

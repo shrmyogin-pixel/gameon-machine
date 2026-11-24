@@ -1,0 +1,97 @@
+# gameon-clipper settings. This is the ONLY settings file.
+# Paths in 'single quotes' are literal, so Windows backslashes are safe.
+# $HOME is replaced with your user folder automatically.
+
+[general]
+channel_name = "Gameon"
+timezone = "Australia/Melbourne"
+autopost = false            # Zero-Ban Policy: never upload automatically
+
+[paths]
+data_dir = "data"
+database = "data/clips.sqlite"
+log_file = "data/logs/clipper.log"
+clips_dir = "data/clips"
+sessions_dir = "data/sessions"
+
+[recorder]
+check_interval_seconds = 60          # how often to ask "is the channel live?"
+segment_seconds = 10                 # length of each .ts segment
+keep_hours = 1                       # segments older than this are deleted
+quality = "720p60,720p,best"         # tried in this order
+twitch_low_latency = true
+
+[tools]
+whisper_cli = 'C:\whisper\Release\whisper-cli.exe'
+whisper_model_en = '$HOME\whisper-models\ggml-small.en.bin'
+whisper_model_multi = '$HOME\whisper-models\ggml-small.bin'
+# These are found on your PATH. Change only if you want a specific copy.
+ffmpeg = "ffmpeg"
+streamlink = "streamlink"
+claude = "claude"
+
+[encoding]
+prefer_hardware = true
+encoders = ["h264_nvenc", "h264_qsv", "h264_amf"]   # tried in order
+fallback = "libx264"
+below_normal_priority = true
+
+[clip]
+min_seconds = 30
+max_seconds = 40
+script_min_words = 80
+script_max_words = 110
+hook_max_words = 12
+
+# ---- Posting slots (Melbourne time, AEDT = UTC+11) ----
+[[slots]]
+name = "Slot 1 - US Peak"
+time = "10:00"
+
+[[slots]]
+name = "Slot 2 - India Peak"
+time = "00:00"
+
+[[slots]]
+name = "Slot 3 - Global Peak"
+time = "02:00"
+
+# ---- Live streams to watch ----
+[[streams]]
+platform = "twitch"
+handle = "lacy"
+url = "https://www.twitch.tv/lacy"
+lang = "en"
+
+[[streams]]
+platform = "youtube"
+handle = "CarryMinati"
+url = "https://www.youtube.com/@CarryMinati/live"
+lang = "hi"
+
+[[streams]]
+platform = "youtube"
+handle = "PlayStation"
+url = "https://www.youtube.com/@PlayStation/live"
+lang = "en"
+
+# ---- Gaming news RSS feeds ----
+[[feeds]]
+name = "IGN"
+url = "https://feeds.feedburner.com/ign/all"
+
+[[feeds]]
+name = "GameSpot"
+url = "https://www.gamespot.com/feeds/mashup/"
+
+[[feeds]]
+name = "PC Gamer"
+url = "https://www.pcgamer.com/rss/"
+
+[[feeds]]
+name = "PlayStation Blog"
+url = "https://blog.playstation.com/feed/"
+
+[[feeds]]
+name = "Xbox Wire"
+url = "https://news.xbox.com/en-us/feed/"
