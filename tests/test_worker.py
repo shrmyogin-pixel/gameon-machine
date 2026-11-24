@@ -60,7 +60,7 @@ class Models(unittest.TestCase):
         self.assertNotEqual(CFG.whisper_model_en, CFG.whisper_model_multi)
 
     def test_config(self):
-        self.assertEqual((CFG.clip["context_before"], CFG.clip["context_after"], CFG.clip["workers"]), (75, 45, 2))
+        self.assertEqual((CFG.clip["context_before"], CFG.clip["context_after"], CFG.clip["workers"]), (75, 35, 2))
 
 
 class Segments(unittest.TestCase):

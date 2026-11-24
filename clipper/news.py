@@ -3,7 +3,8 @@
     RSS feeds (last N hours)  ->  headless Claude (+ voice.md) picks the top stories and writes the scripts
     -> 5 hooks per story scored by hookscore.py  ->  edge-tts voiceover  ->  word timestamps from Groq
     (whisper-large-v3-turbo)  ->  1080x1920 Short rendered with the normal hardware FFmpeg path
-    (watermark + 3-word bold captions)  ->  data/clips.sqlite with platform = "news".
+    (the article's real picture with Ken Burns zoom/pan + dark scrim, watermark, 3-word bold captions)
+    ->  data/clips.sqlite with platform = "news".
 
 Policy: every Short credits its source ("Sources & Credits: <outlet>, <exact article URL>"), profanity is
 masked, real-money-gambling stories are skipped, and nothing is ever uploaded (autopost = false).
@@ -30,6 +31,7 @@ from zoneinfo import ZoneInfo
 from . import db
 from .config import PROJECT_ROOT, Config, get_env_key
 from .hookscore import HookScore, banned_in, rank_hooks, words_of
+from .newsimage import fetch_news_image, image_from_entry
 from .profanity import mask
 
 log = logging.getLogger("clipper")
@@ -54,6 +56,7 @@ class Story:
     summary: str
     link: str
     published: datetime
+    image_url: str | None = None      # the picture the RSS feed itself carries (if any)
 
 
 @dataclass
@@ -103,7 +106,8 @@ def parse_feed(name: str, parsed, cutoff: datetime) -> list[Story]:
         published = datetime.fromtimestamp(timegm(when), timezone.utc)
         if published < cutoff:
             continue
-        out.append(Story(0, name, title, _clean(e.get("summary") or e.get("description") or ""), link, published))
+        out.append(Story(0, name, title, _clean(e.get("summary") or e.get("description") or ""), link, published,
+                         image_from_entry(e)))
     return out
 
 
@@ -450,6 +454,11 @@ def make_short(cfg: Config, pick: Pick) -> Path:
                 source_url=story.link)
     try:
         (folder / "script.txt").write_text(pick.script + "\n", encoding="utf-8")
+        picture = None
+        if cfg.news["images"]:
+            picture = fetch_news_image(story, folder, float(cfg.news["image_timeout"]))     # None = gradient fallback
+            log.info("[%s] news picture: %s", folder.name,
+                     f"{picture['source']} {picture['width']}x{picture['height']}" if picture else "none (gradient)")
         mp3 = folder / "voiceover.mp3"
         voice = synthesize(cfg, pick.script, mp3)
         dur = probe_duration(cfg, mp3)
@@ -468,23 +477,29 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         (folder / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
 
         info = {"hook": pick.hook.hook, "headline": pick.headline, "kind": pick.kind, "outlet": story.outlet,
-                "title": pick.title}
+                "title": pick.title, "image": picture["file"] if picture else None}
         render = render_news_video(cfg, folder, info, words, dur)
 
         credit = credit_for_story(story)
+        used_picture = render.get("background") == "picture"
+        credit_lines = [pick.description, f"Read the original story: {story.link}"]
+        if used_picture:
+            credit_lines.append(f"Image: {story.outlet} (article picture)")
         analysis = {
             "post": True, "status": "edited", "autopost": False, "needs_human_review": pick.sensitive,
             "score": pick.score, "banger": pick.score >= 9, "sensitive": pick.sensitive,
             "sensitive_reason": pick.sensitive_reason, "reason": pick.reason, "start": 0.0, "end": round(dur, 2),
             "title": pick.title, "hook": pick.hook.hook.upper(), "meme_caption": [], "tags": pick.tags,
             "hashtags": pick.hashtags, "description": pick.description,
-            "description_full": f"{pick.description}\nRead the original story: {story.link}\n{credit}",
+            "description_full": "\n".join([*credit_lines, credit]),
             "attribution": f"Read the original story: {story.link}", "credit_line": credit,
             "news": {"url": story.link, "outlet": story.outlet, "headline": story.title, "kind": pick.kind,
                      "published": story.published.isoformat(timespec="minutes"), "script": pick.script,
                      "hooks": [{"hook": h.hook, "score": h.total, "valid": h.valid, "parts": h.parts,
                                 "reasons": h.reasons} for h in pick.hooks],
-                     "voice": voice, "word_timestamps": how},
+                     "voice": voice, "word_timestamps": how,
+                     "image": ({"url": picture["url"], "source": picture["source"], "used": used_picture}
+                               if picture else None)},
             "render": render}
         (folder / "analysis.json").write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
         db.record_analysis(cfg.database, folder.name, analysis, folder / "analysis.json")
@@ -506,16 +521,36 @@ def make_short(cfg: Config, pick: Pick) -> Path:
 
 
 # ------------------------------------------------------------------ the whole run
-def run_news(cfg: Config, hours: float | None = None, count: int | None = None, dry_run: bool = False) -> NewsResult:
-    """Fetch -> pick -> script -> voice -> render for the top stories. Never raises."""
+def news_left_today(cfg: Config, now: datetime | None = None) -> int:
+    """How many more news Shorts today's quota ([volume] news_per_day, Melbourne day) allows; 0 = full."""
+    from .routing import day_start_utc
+    cap = int(cfg.volume["news_per_day"])
+    if cap <= 0:
+        return 10 ** 6
+    made = db.count_accepted_since(cfg.database, day_start_utc(cfg, now), news=True)
+    return max(cap - made, 0)
+
+
+def run_news(cfg: Config, hours: float | None = None, count: int | None = None, dry_run: bool = False,
+             quota: bool = False) -> NewsResult:
+    """Fetch -> pick -> script -> voice -> render for the top stories. Never raises.
+
+    quota=True (the scheduled runs) also stops at today's [volume] news_per_day; a run you start by hand does not."""
     result = NewsResult()
     try:
         if cfg.raw.get("general", {}).get("autopost", False):
             log.warning("config has autopost=true; ignored - this tool never uploads")
         db.init_db(cfg.database)
         cfg_news = dict(cfg.raw.get("news", {}))
-        if count is not None:
-            cfg.raw["news"] = {**cfg_news, "stories": count}
+        want = int(count if count is not None else cfg.news["stories"])
+        if quota:
+            left = news_left_today(cfg)
+            if left <= 0:
+                result.note = f"today's news quota ({cfg.volume['news_per_day']}) is already made"
+                log.info("news: %s", result.note)
+                return result
+            want = min(want, left)
+        cfg.raw["news"] = {**cfg_news, "stories": want}
         stories = fetch_stories(cfg, hours)
         if not stories:
             result.note = f"no fresh stories in the last {hours or cfg.news['hours']:g}h (or all already used)"
@@ -559,7 +594,7 @@ class NewsScheduler(threading.Thread):
     def __init__(self, cfg: Config, stop: threading.Event, runner=None):
         super().__init__(name="news-scheduler", daemon=True)
         self.cfg, self.stop_event, self.done = cfg, stop, set()
-        self.runner = runner or run_news
+        self.runner = runner or (lambda c: run_news(c, quota=True))
         self.tz = ZoneInfo(cfg.raw.get("general", {}).get("timezone", "Australia/Melbourne"))
 
     def run(self) -> None:

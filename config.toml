@@ -44,12 +44,12 @@ script_min_words = 80
 script_max_words = 110
 hook_max_words = 12
 context_before = 75         # seconds of footage kept before a spike
-context_after = 45          # seconds kept after it (the worker waits this long first)
+context_after = 35          # seconds kept after it (the worker waits this long first)
 workers = 2                 # clipper workers running at the same time (whisper is heavy)
 
 [ai]
 model = "sonnet"            # headless Claude editor (claude -p --model ...)
-min_score = 5               # normal mode: clips scoring below this are skipped
+min_score = 4.5             # normal mode: clips scoring below this are skipped
 launch_mode = false         # true = channel-launch mode: use launch_min_score instead (more clips get through)
 launch_min_score = 4
 timeout_seconds = 240       # per Claude call
@@ -58,12 +58,14 @@ retries = 1                 # extra attempts when the reply is not valid JSON / 
 [render]
 max_renders = 1             # video renders running at the same time (1 keeps the PC usable)
 
-# ---- ~15 Shorts a day: ~9 from live streams + ~6 news Shorts (3 news runs x 2 stories) ----
+# ---- 10-15 fresh Shorts a day: up to 10 news (3 scheduled runs x 4 stories, stopped at news_per_day) + up to 5 live ----
+# Live clips depend on what the streams do, so on a quiet day the total is lower; bangers can exceed the live cap.
+# You review and upload by hand, so this is a candidate pool, not an upload schedule.
 # A starting point: check `python -m clipper status` after a few days and adjust.
 [volume]
 daily_target = 15
-news_per_day = 6
-live_max_per_day = 9               # once this many live clips were accepted today (Melbourne day), weaker ones are skipped
+news_per_day = 10                  # scheduled news runs stop here (a run you start by hand with `news` ignores it)
+live_max_per_day = 5               # once this many live clips were accepted today (Melbourne day), weaker ones are skipped
 live_cap_override_score = 9        # ...but a banger or a score >= this always gets through
 
 # ---- Platform routing: top clips -> YouTube (one per peak slot below), the rest -> other platforms ----
@@ -84,7 +86,9 @@ corner = "left"                    # "left" or "right"; bottom, above the y=1450
 # ---- Breaking News Engine: python -m clipper news (feeds come from the [[feeds]] list below) ----
 [news]
 hours = 12                         # only stories newer than this
-stories = 2                        # news Shorts per run
+stories = 4                        # news Shorts per run (repeat stories are skipped: same URL, same headline, same event)
+images = true                      # use the article's real picture (feed image / og:image) with Ken Burns; false = gradient only
+image_timeout = 15                 # seconds per picture / article-page download
 script_min_words = 80
 script_max_words = 105             # ~35 seconds spoken
 target_seconds = 35
@@ -124,12 +128,12 @@ time = "02:00"
 bucket_seconds = 5
 baseline_buckets = 60            # rolling baseline = last 60 buckets (5 minutes)
 warmup_buckets = 12              # never fire during the first 12 buckets of a session
-std_multiplier = 2.5             # count >= mean + 2.5 x standard deviation
-median_multiplier = 2.0          # count >= 2.0 x median
-min_messages = 10                # count >= this (override per stream)
-min_unique_ratio = 0.5           # unique chatters / messages >= 0.5
+std_multiplier = 2.2             # count >= mean + 2.2 x standard deviation
+median_multiplier = 1.8          # count >= 1.8 x median
+min_messages = 8                 # count >= this (override per stream)
+min_unique_ratio = 0.45          # unique chatters / messages >= 0.45
 max_per_user = 2                 # count at most this many messages per user per bucket
-cooldown_seconds = 90            # after a moment, that stream stays quiet this long
+cooldown_seconds = 75            # after a moment, that stream stays quiet this long
 ignore_prefix = "!"              # ignore bot commands like !discord
 ignore_users = ["nightbot", "streamelements", "moobot", "fossabot", "wizebot", "streamlabs", "soundalerts", "sery_bot"]
 # --- Audio loudness (measured every second from the recording) ---
@@ -170,7 +174,7 @@ platform = "twitch"
 handle = "lacy"
 url = "https://www.twitch.tv/lacy"
 lang = "en"
-min_messages = 10          # per-stream override of [detect] min_messages
+min_messages = 8           # per-stream override of [detect] min_messages
 
 [[streams]]
 platform = "youtube"

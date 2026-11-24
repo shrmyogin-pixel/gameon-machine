@@ -169,8 +169,12 @@ class ValidateTests(unittest.TestCase):
     def test_code_fences_are_tolerated(self):
         self.assertEqual(len(self.check(reply(1), fenced=True)), 1)
 
+    def test_default_is_four_stories_per_run(self):
+        self.assertEqual(load_config().news["stories"], 4)
+
     def test_at_most_requested_stories(self):
-        self.assertEqual(len(self.check(reply(1), reply(2), reply(3))), self.cfg.news["stories"])
+        self.cfg.raw = {**self.cfg.raw, "news": {**self.cfg.raw.get("news", {}), "stories": 2}}
+        self.assertEqual(len(self.check(reply(1), reply(2), reply(3))), 2)
 
     def test_hook_that_breaks_total_word_range_is_skipped_for_one_that_fits(self):
         long_hook = "GTA 6 officially hits PlayStation records today for real now yes"      # 11 words
