@@ -48,6 +48,10 @@
   .note { color: var(--dim); font-size: 12px; }
   .card input[type=text], .card textarea { width: 100%; }
   .card textarea { min-height: 96px; resize: vertical; }
+  .route { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px; border: 1px dashed var(--line);
+           border-radius: 8px; }
+  .route.set { border-style: solid; border-color: var(--accent); }
+  .route select { width: 100%; min-width: 0; }
   .credit { font-size: 12px; color: var(--dim); border-left: 3px solid var(--line); padding-left: 8px;
             word-break: break-word; }
   .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
@@ -105,6 +109,7 @@
 const $ = (id) => document.getElementById(id);
 const FILTERS = ["status", "streamer", "banger", "sensitive", "sort"];
 let counts = {};
+let slots = [];       // [{name, time}] from config.toml [[slots]]
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -219,6 +224,32 @@ function card(clip) {
     } catch (e) { toast(e.message, true); buttons.forEach((b) => (b.disabled = false)); }
   }
 
+  async function saveRoute(slot, target) {
+    if (state.dirty && !(await save())) return;
+    try {
+      const r = await api(`/api/clips/${clip.id}/route`, { slot, target });
+      toast(slot || target ? "Routing saved" : "Back to automatic routing");
+      replaceWith(r.clip, r.counts);
+    } catch (e) { toast(e.message, true); }
+  }
+  let routeBox = null;
+  if (clip.can_route) {
+    const slotSel = h("select", { "aria-label": "Posting slot" },
+      h("option", { value: "" }, "no slot / auto"),
+      slots.map((s) => h("option", { value: s.name }, `${s.name} · ${s.time} AEDT`)));
+    slotSel.value = slots.some((s) => s.name === clip.assign_slot) ? clip.assign_slot : "";
+    const targetSel = h("select", { "aria-label": "Send to" },
+      h("option", { value: "" }, "auto"),
+      h("option", { value: "youtube" }, "YouTube (top 2-3)"),
+      h("option", { value: "other" }, "Other platforms"));
+    targetSel.value = clip.assign_target || "";
+    const go = () => saveRoute(slotSel.value, targetSel.value);
+    slotSel.addEventListener("change", go);
+    targetSel.addEventListener("change", go);
+    routeBox = h("div", { class: "route" + (clip.assign_slot || clip.assign_target ? " set" : "") },
+      h("label", {}, "Posting slot", slotSel), h("label", {}, "Send to", targetSel));
+  }
+
   const media = h("div", { class: "media" });
   if (clip.video_url) {
     media.append(h("video", { controls: true, preload: "none", playsinline: true,
@@ -251,6 +282,7 @@ function card(clip) {
   if (clip.hook) root.append(h("div", { class: "note" }, "Hook: " + clip.hook +
     ((clip.meme_caption || []).length ? "  |  Meme: " + clip.meme_caption.join(" / ") : "")));
 
+  if (routeBox) root.append(routeBox);
   root.append(h("label", {}, "Title", title), h("label", {}, "Description", desc),
     h("div", { class: "credit", title: "Locked: every export must keep its credit line" }, clip.credit),
     h("label", {}, "Tags (comma separated)", tags));
@@ -280,6 +312,7 @@ async function load() {
   try {
     const data = await api("/api/clips?" + query());
     counts = data.counts; updateSummary();
+    slots = data.slots || [];
     const sel = $("f-streamer"), keep = sel.value;
     sel.replaceChildren(h("option", { value: "" }, "all"), ...data.streamers.map((n) => h("option", { value: n }, n)));
     sel.value = data.streamers.includes(keep) ? keep : "";

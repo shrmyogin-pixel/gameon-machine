@@ -208,6 +208,26 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(status, 400)                                         # missing action
         self.assertEqual(db.get_clip(self.cfg.database, skipped)["status"], "skipped")
 
+    def test_assign_slot_and_target(self):
+        cid = self.ids["a"]
+        slots = self.clips()["slots"]
+        self.assertEqual([s["time"] for s in slots], ["10:00", "00:00", "02:00"])
+        status, data, _ = self.call("POST", f"/api/clips/{cid}/route", {"slot": slots[1]["name"], "target": "youtube"})
+        self.assertEqual(status, 200)
+        self.assertEqual((data["clip"]["assign_slot"], data["clip"]["assign_target"]),
+                         (slots[1]["name"], "youtube"))
+        self.assertEqual((data["clip"]["route_platform"], data["clip"]["route_slot"]), ("youtube", slots[1]["name"]))
+        status, data, _ = self.call("POST", f"/api/clips/{cid}/route", {"slot": slots[2]["name"], "target": "other"})
+        self.assertEqual((data["clip"]["route_slot"], data["clip"]["route_platform"] != "youtube"),
+                         (slots[2]["name"], True))
+        status, data, _ = self.call("POST", f"/api/clips/{cid}/route", {"slot": "", "target": ""})     # back to auto
+        self.assertEqual((data["clip"]["assign_slot"], data["clip"]["assign_target"]), (None, None))
+        for bad in ({"slot": "Slot 9"}, {"target": "tiktok"}):
+            self.assertEqual(self.call("POST", f"/api/clips/{cid}/route", bad)[0], 400)
+        skipped = next(c["id"] for c in db.list_clips(self.cfg.database) if c["status"] == "skipped")
+        self.assertEqual(self.call("POST", f"/api/clips/{skipped}/route", {"target": "other"})[0], 409)
+        self.assertEqual(self.call("POST", "/api/clips/99999/route", {"target": "other"})[0], 404)
+
     def test_edit_masks_profanity_and_keeps_credit_line(self):
         cid = self.ids["c"]
         status, data, _ = self.call("POST", f"/api/clips/{cid}/edit", {

@@ -64,7 +64,10 @@ EXTRA_COLUMNS = {
     "route_slot": "TEXT",         # YouTube best-of-best clips: the AEDT peak slot name
     "route_at": "TEXT",           # next occurrence of that slot, Melbourne time (ISO)
     "route_rank": "INTEGER",      # 1 = best of the pending queue
+    "assign_slot": "TEXT",        # HUMAN choice: posting slot name from config [[slots]] (beats the automatic routing)
+    "assign_target": "TEXT",      # HUMAN choice: 'youtube' (top 2-3) or 'other' platforms (beats the automatic routing)
 }
+ASSIGN_TARGETS = ("youtube", "other")
 
 
 @contextmanager
@@ -362,6 +365,21 @@ def set_route(db_path: Path, clip_id: int, platform: str | None, slot: str | Non
                      (platform, slot, at, rank, clip_id))
 
 
+def set_assignment(db_path: Path, clip_id: int, slot: str | None, target: str | None) -> dict:
+    """Save the human's slot / target choice for a rendered or approved clip (None = leave it to the automatic routing)."""
+    if target not in (None, *ASSIGN_TARGETS):
+        raise ReviewError("target must be 'youtube' or 'other'")
+    clip = get_clip(db_path, clip_id)
+    if not clip:
+        raise ReviewError("clip not found", 404)
+    if clip["status"] not in ("rendered", "approved"):
+        raise ReviewError(f"cannot route a clip that is '{clip['status']}'", 409)
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET assign_slot = ?, assign_target = ?, updated_at = datetime('now') WHERE id = ?",
+                     (slot, target, clip_id))
+    return get_clip(db_path, clip_id)
+
+
 def clip_by_folder(db_path: Path, folder: str) -> dict | None:
     with connect(db_path) as conn:
         row = conn.execute("SELECT * FROM clips WHERE folder = ?", (folder,)).fetchone()
@@ -382,3 +400,22 @@ def news_urls_seen(db_path: Path) -> set[str]:
     with connect(db_path) as conn:
         return {r["source_url"] for r in conn.execute(
             "SELECT source_url FROM clips WHERE platform = 'news' AND source_url IS NOT NULL AND status != 'failed'")}
+
+
+# ------------------------------------------------------------------ clean
+# status -> the column that says when it reached that status (all UTC 'YYYY-MM-DD HH:MM:SS')
+CLEAN_AGE_COLUMN = {"skipped": "updated_at", "rejected": "reviewed_at", "posted": "posted_at"}
+
+
+def clips_older_than(db_path: Path, status: str, cutoff_utc: str) -> list[dict]:
+    """Clips with this status that reached it before `cutoff_utc` (falls back to updated_at / created_at)."""
+    col = CLEAN_AGE_COLUMN[status]
+    with connect(db_path) as conn:
+        rows = conn.execute(f"SELECT * FROM clips WHERE status = ? AND COALESCE({col}, updated_at, created_at) < ?"
+                            " ORDER BY id", (status, cutoff_utc)).fetchall()
+    return [row_to_dict(r) for r in rows]
+
+
+def delete_clip_row(db_path: Path, clip_id: int) -> None:
+    with connect(db_path) as conn:
+        conn.execute("DELETE FROM clips WHERE id = ?", (clip_id,))

@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     nw.add_argument("--hours", type=float, help="only stories newer than this (default [news] hours = 12)")
     nw.add_argument("--count", type=int, help="how many stories to make (default [news] stories = 2)")
     nw.add_argument("--dry-run", action="store_true", help="pick stories and write scripts only: no voice, video or database rows")
+    cl = sub.add_parser("clean", help="delete skipped/rejected clips older than 2 days and posted clips older than 7 days")
+    cl.add_argument("--dry-run", action="store_true", help="list what would be deleted, delete nothing")
     sub.add_parser("route", help="show / refresh the platform + peak-slot routing of the pending clips")
     sub.add_parser("watermark", help="(re)build assets/watermark.png from assets/watermark.jpg")
     rv = sub.add_parser("review", help="start the local review dashboard (http://127.0.0.1:8765, localhost only)")
@@ -202,6 +204,20 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"\n{len(res.made)} news Short(s) ready. Review them with: python -m clipper review")
             print("Nothing was uploaded.")
             return 0 if (res.made or (args.dry_run and res.picked) or (not res.failed and not res.note.startswith("run failed"))) else 1
+        if args.command == "clean":
+            from .clean import run_clean, settings as clean_settings
+
+            res = run_clean(cfg, args.dry_run)
+            verb = "Would delete" if args.dry_run else "Deleted"
+            for c in res.deleted:
+                print(f"  {verb}: #{c['id']} {c['status']:<8} {c['folder']}")
+            for c, why in res.failed:
+                print(f"  COULD NOT DELETE: #{c['id']} {c['folder']}: {why}")
+            cs = clean_settings(cfg)
+            print(f"{len(res.deleted)} clip(s) {'would be ' if args.dry_run else ''}deleted, {res.freed_bytes / 1e6:.1f} MB "
+                  f"{'would be ' if args.dry_run else ''}freed, {len(res.failed)} failed."
+                  f"  (skipped/rejected > {cs['skipped_days']}/{cs['rejected_days']} days, posted > {cs['posted_days']} days)")
+            return 0 if not res.failed else 1
         if args.command == "route":
             from .routing import assign_routes
 

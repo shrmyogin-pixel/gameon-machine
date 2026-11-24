@@ -2,7 +2,7 @@
 
 * Binds to 127.0.0.1 only (never reachable from the network). Host and Origin headers are checked, and
   every change needs a JSON body, so a web page you happen to visit cannot click buttons for you.
-* Approve / Reject / Mark Posted only record your decision in the database. Nothing is ever uploaded
+* Approve / Reject / Mark Posted and the Slot / Send-to choices only record your decision in the database. Nothing is ever uploaded
   (autopost = false); you post by hand.
 * Video and thumbnail are served by clip id from the clip's own folder with fixed file names, so no
   path from the browser is ever opened.
@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import db
 from .config import Config
+from .routing import assign_routes
 
 log = logging.getLogger("clipper")
 
@@ -40,6 +41,7 @@ def clip_view(clip: dict, clips_dir: Path) -> dict:
     out["thumb_url"] = f"/media/{clip['id']}/thumb.jpg" if (folder / "thumb.jpg").is_file() else None
     out["description_body"], out["credit"] = db.split_description(clip)
     out["can_review"] = clip["status"] in db.REVIEW_STATUSES
+    out["can_route"] = clip["status"] in ("rendered", "approved")
     return out
 
 
@@ -131,7 +133,9 @@ class Handler(BaseHTTPRequestHandler):
                               _tri(one("sensitive")), sort)
         self._json(200, {"clips": [clip_view(c, self.cfg.clips_dir) for c in clips],
                          "counts": db.status_counts(self.cfg.database),
-                         "streamers": db.streamers(self.cfg.database)})
+                         "streamers": db.streamers(self.cfg.database),
+                         "slots": [{"name": s["name"], "time": s["time"]} for s in self.cfg.slots],
+                         "targets": list(db.ASSIGN_TARGETS)})
 
     def _media(self, clip_id: int, name: str) -> None:
         ctype = MEDIA.get(name)
@@ -179,13 +183,24 @@ class Handler(BaseHTTPRequestHandler):
                 left -= len(chunk)
 
     # ---------------------------------------------------------------- POST
+    def _route(self, clip_id: int, body: dict) -> dict:
+        """Save the human's posting slot ('' = none) and target ('' = automatic | youtube | other)."""
+        slot = str(body.get("slot") or "").strip() or None
+        target = str(body.get("target") or "").strip() or None
+        if slot and slot not in {s["name"] for s in self.cfg.slots}:
+            raise db.ReviewError("unknown slot")
+        clip = db.set_assignment(self.cfg.database, clip_id, slot, target)
+        assign_routes(self.cfg)                      # refresh the route badge (and re-rank the automatic picks)
+        log.info("[%s] review: slot=%s target=%s", clip["folder"], slot, target)
+        return db.get_clip(self.cfg.database, clip_id)
+
     def do_POST(self):
         try:
             if not self._host_ok() or not self._origin_ok():
                 return self._error(HTTPStatus.FORBIDDEN, "request not allowed")
             if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
                 return self._error(415, "send application/json")
-            m = re.fullmatch(r"/api/clips/(\d+)/(status|edit)", urlsplit(self.path).path)
+            m = re.fullmatch(r"/api/clips/(\d+)/(status|edit|route)", urlsplit(self.path).path)
             if not m:
                 return self._error(404, "not found")
             length = int(self.headers.get("Content-Length") or 0)
@@ -202,6 +217,8 @@ class Handler(BaseHTTPRequestHandler):
                 if m.group(2) == "status":
                     clip = db.review_action(self.cfg.database, clip_id, str(body.get("action", "")))
                     log.info("[%s] review: %s -> %s", clip["folder"], body.get("action"), clip["status"])
+                elif m.group(2) == "route":
+                    clip = self._route(clip_id, body)
                 else:
                     clip = db.edit_clip_text(self.cfg.database, clip_id, body.get("title", ""),
                                              body.get("description", ""), body.get("tags", []))

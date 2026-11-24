@@ -1,13 +1,18 @@
 """`python -m clipper export`: package approved clips for manual upload.
 
-For every approved clip that has not been exported yet this writes, into data/exports/<YYYY-MM-DD>/:
+For every approved clip that has not been exported yet this writes, into
+data/exports/<YYYY-MM-DD>/<slot folder>/<youtube|other>/   (e.g. slot-1-us-peak/youtube/):
 
     <platform>-<handle>-<title>.mp4   copy of clip.mp4
     <platform>-<handle>-<title>.jpg   copy of thumb.jpg
     <platform>-<handle>-<title>.txt   upload sheet: Title, Description, Hashtags, Tags (copy-paste ready)
 
 Rules enforced here:
-* A clip whose description has no final 'Sources & Credits:' line is REFUSED (policy rule 2).
+* A clip whose description has no final 'Sources & Credits:' line is REFUSED (policy rule 2). This is checked
+  on the description, again on the finished upload sheet text, and once more on the .txt file read back from
+  disk; a package that fails any check is deleted.
+* Folders: the slot (Slot 1 / 2 / 3, your choice in the review dashboard, else the automatic route) and the
+  target (youtube = top 2-3, other = the other platforms). Clips without a slot go to 'no-slot'.
 * Profanity is masked again in everything written (policy rule 4).
 * Nothing is uploaded; this only copies files (autopost = false, policy rule 5).
 * One bad clip never stops the others: it is logged, counted, and skipped.
@@ -26,6 +31,7 @@ from pathlib import Path
 from . import db
 from .config import Config
 from .profanity import mask
+from .routing import destination
 
 log = logging.getLogger("clipper")
 
@@ -34,6 +40,7 @@ MAX_NAME = 90                  # characters of file name (without extension); ke
 MAX_HASHTAGS = 15              # YouTube ignores every hashtag on a video that has more than 15
 MAX_TAGS_CHARS = 500           # YouTube's limit for the whole tags field
 SHEET_RULE = "=" * 60
+DESCRIPTION_HEADER = "DESCRIPTION (paste as is; the last line is the required credit)"
 
 
 class ExportRefused(Exception):
@@ -117,7 +124,26 @@ def check_credit(description: str) -> str:
     return lines[-1]
 
 
-def build_sheet(clip: dict, folder: Path, mp4_name: str, thumb_name: str | None) -> str:
+def sheet_description(sheet: str) -> str:
+    """The DESCRIPTION section of an upload sheet (what gets pasted into the upload form)."""
+    head = f"{SHEET_RULE}\n{DESCRIPTION_HEADER}\n{SHEET_RULE}\n"
+    if head not in sheet:
+        raise ExportRefused("upload sheet has no DESCRIPTION section")
+    return sheet.split(head, 1)[1].split(f"\n{SHEET_RULE}\nHASHTAGS", 1)[0]
+
+
+def verify_sheet(sheet: str) -> None:
+    """Last gate: the text that will be in the .txt file must end its description with the credit line."""
+    check_credit(sheet_description(sheet))
+
+
+def folder_parts(cfg: Config, clip: dict) -> tuple[str, str]:
+    """-> (slot folder, target folder), e.g. ('slot-1-us-peak', 'youtube')."""
+    slot, target = destination(clip, [s["name"] for s in cfg.slots])
+    return (slugify(slot, 40) or "no-slot") if slot else "no-slot", target or "unrouted"
+
+
+def build_sheet(clip: dict, folder: Path, mp4_name: str, thumb_name: str | None, dest: str | None = None) -> str:
     """The .txt upload sheet. Raises ExportRefused when the credit line is missing."""
     description = mask(clip.get("description") or "")
     credit = check_credit(description)
@@ -133,6 +159,8 @@ def build_sheet(clip: dict, folder: Path, mp4_name: str, thumb_name: str | None)
              f"Streamer:    {clip['handle']} ({clip['platform']})", f"Clip id:     {clip['id']}"]
     if clip.get("ai_score") is not None:
         notes.append(f"AI score:    {clip['ai_score']:g}/10" + ("  (banger)" if clip.get("banger") else ""))
+    if dest:
+        notes.append(f"Post to:     {dest}")
     if clip.get("route_platform"):
         where = clip["route_platform"].upper()
         if clip.get("route_slot"):
@@ -142,14 +170,16 @@ def build_sheet(clip: dict, folder: Path, mp4_name: str, thumb_name: str | None)
         notes.append(f"Source URL:  {clip['source_url']}")
     if clip.get("sensitive"):
         notes.append(f"REVIEW NOTE: flagged sensitive by the AI editor: {mask(clip.get('sensitive_reason') or '')}")
-    return "\n".join([
+    sheet = "\n".join([
         "UPLOAD SHEET - copy each section into YouTube Studio / Reels. Nothing was uploaded for you.", "",
         SHEET_RULE, "TITLE", SHEET_RULE, title, "",
-        SHEET_RULE, "DESCRIPTION (paste as is; the last line is the required credit)", SHEET_RULE, full, "",
+        SHEET_RULE, DESCRIPTION_HEADER, SHEET_RULE, full, "",
         SHEET_RULE, "HASHTAGS", SHEET_RULE, " ".join(hashtags) or "(none)", "",
         SHEET_RULE, f"TAGS (comma separated, {sum(len(t) for t in tags)} characters)", SHEET_RULE,
         ", ".join(tags) or "(none)", "",
         SHEET_RULE, "NOT FOR PASTING", SHEET_RULE, *notes, ""])
+    verify_sheet(sheet)
+    return sheet
 
 
 # ------------------------------------------------------------------ export
@@ -179,8 +209,8 @@ def _remove_previous(cfg: Config, clip: dict) -> None:
             prev.with_suffix(ext).unlink(missing_ok=True)
 
 
-def export_one(cfg: Config, clip: dict, out_dir: Path) -> Path:
-    """Package one clip into out_dir. Returns the .mp4 path; raises ExportRefused if it must not be exported."""
+def export_one(cfg: Config, clip: dict, day_dir: Path) -> Path:
+    """Package one clip into day_dir/<slot>/<target>/. Returns the .mp4 path; raises ExportRefused if it must not be exported."""
     if clip["status"] != "approved":
         raise ExportRefused(f"status is '{clip['status']}', only approved clips are exported")
     folder = cfg.clips_dir / clip["folder"]
@@ -194,10 +224,13 @@ def export_one(cfg: Config, clip: dict, out_dir: Path) -> Path:
         raise ExportRefused("clip.mp4 is missing")
     check_credit(mask(clip.get("description") or ""))       # refuse before touching the disk
     _remove_previous(cfg, clip)
+    out_dir = day_dir.joinpath(*folder_parts(cfg, clip))
     out_dir.mkdir(parents=True, exist_ok=True)
     name = free_name(out_dir, base_name(clip))
     mp4, jpg, txt = (out_dir / (name + e) for e in (".mp4", ".jpg", ".txt"))
-    sheet = build_sheet(clip, folder, mp4.name, jpg.name if src_jpg.is_file() else None)
+    slot, target = destination(clip, [s["name"] for s in cfg.slots])
+    dest = (target or "unrouted").upper() + (f" - {slot}" if slot else " - no slot chosen")
+    sheet = build_sheet(clip, folder, mp4.name, jpg.name if src_jpg.is_file() else None, dest)
     written: list[Path] = []
     try:
         _copy(src_mp4, mp4)
@@ -209,6 +242,7 @@ def export_one(cfg: Config, clip: dict, out_dir: Path) -> Path:
             log.warning("[%s] no thumb.jpg; exporting without a thumbnail", clip["folder"])
         txt.write_text(sheet, encoding="utf-8-sig")        # BOM so Windows Notepad shows Hindi correctly
         written.append(txt)
+        verify_sheet(txt.read_text(encoding="utf-8-sig"))  # what is really on disk must carry the credit line
     except Exception:
         for f in written:                                   # no half-finished packages
             f.unlink(missing_ok=True)
@@ -238,7 +272,7 @@ def run_export(cfg: Config, include_all: bool = False, ids: list[int] | None = N
                 check_credit(mask(clip.get("description") or ""))
                 if clip["status"] != "approved":
                     raise ExportRefused(f"status is '{clip['status']}', only approved clips are exported")
-                result.exported.append((clip, out_dir / (base_name(clip) + ".mp4")))
+                result.exported.append((clip, out_dir.joinpath(*folder_parts(cfg, clip)) / (base_name(clip) + ".mp4")))
                 continue
             mp4 = export_one(cfg, clip, out_dir)
             db.mark_exported(cfg.database, clip["id"], mp4)

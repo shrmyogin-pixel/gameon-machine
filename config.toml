@@ -95,6 +95,12 @@ max_candidates = 40                # newest headlines shown to Claude
 auto_run = true                    # `run` / run.bat also makes news Shorts at the times below
 run_times = ["07:30", "13:30", "19:30"]   # local (Melbourne) time
 
+# ---- `python -m clipper clean`: delete old clip folders + rows (exports are never touched) ----
+[clean]
+skipped_days = 2            # skipped clips older than this
+rejected_days = 2           # rejected clips older than this
+posted_days = 7             # posted clips older than this
+
 [notify]
 enabled = true              # Windows toast when a strong clip finishes rendering (falls back to a console beep + log)
 min_score = 8               # toast when the AI score is at least this ...
