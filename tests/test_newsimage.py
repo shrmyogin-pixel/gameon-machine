@@ -1,6 +1,6 @@
 """Run:  python -m unittest discover tests -v   (from the project root, in the venv)
 
-News visuals + music: finding 3-5 article pictures, refusing unsafe hosts, validating bytes, meme-card top-up,
+News visuals + music: finding 4-6 real pictures (article first, topic screenshots as top-up), refusing unsafe hosts, validating bytes,
 cuts with varied Ken Burns motion, the ducked music mix and its automatic attribution. Real ffmpeg for the render
 tests; no real network (downloads are mocked).
 """
@@ -17,7 +17,7 @@ import cv2
 import feedparser
 import numpy as np
 
-from clipper import db, export, memes, music, news, news_render, newsimage
+from clipper import db, export, imagesearch, music, news, news_render, newsimage
 from clipper.config import load_config
 
 NOW = datetime(2026, 11, 24, 10, 0, tzinfo=timezone.utc)
@@ -166,7 +166,7 @@ class SafetyTests(unittest.TestCase):
 
 class FetchImagesTests(unittest.TestCase):
     def make_fake(self, pictures, fail=()):
-        def fake(url, limit, timeout, truncate=False):
+        def fake(url, limit, timeout, truncate=False, referer=None):
             if url == "https://ign.com/a":
                 return PAGE.encode(), "text/html"
             if url in fail or url not in pictures:
@@ -194,7 +194,7 @@ class FetchImagesTests(unittest.TestCase):
         story = news.Story(1, "IGN", "H", "s", "https://ign.com/a", NOW, "https://cdn.x/p.jpg?w=300", ["https://cdn.x/p.jpg?w=300"])
         calls = []
 
-        def fake(url, limit, timeout, truncate=False):
+        def fake(url, limit, timeout, truncate=False, referer=None):
             calls.append(url)
             if url == "https://ign.com/a":
                 return b"<html></html>", "text/html"
@@ -209,34 +209,6 @@ class FetchImagesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             with mock.patch.object(newsimage, "download", side_effect=OSError("offline")):
                 self.assertEqual(newsimage.fetch_news_images(story, Path(tmp)), [])
-
-
-class MemeTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
-        self.cfg = load_config()
-        self.cfg.raw = {**self.cfg.raw, "news": {**self.cfg.raw.get("news", {}), "memes_dir": str(Path(self.tmp.name) / "memes")}}
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def test_original_cards_are_generated_when_the_folder_is_empty(self):
-        cards = memes.ensure_memes(self.cfg)
-        self.assertEqual(len(cards), len(memes.CARDS))
-        img = cv2.imread(str(cards[0]))
-        self.assertEqual(img.shape[:2], (1920, 1080))
-        self.assertGreater(float(img.std()), 8.0)                                    # not a flat fill
-
-    def test_your_own_pictures_win_and_picking_is_stable_per_story(self):
-        d = Path(self.tmp.name) / "memes"
-        d.mkdir()
-        for i in range(4):
-            (d / f"mine-{i}.jpg").write_bytes(jpeg(800, 600, seed=i))
-        self.assertEqual(len(memes.ensure_memes(self.cfg)), 4)                       # nothing generated on top
-        a = memes.pick_memes(self.cfg, 2, "https://ign.com/1")
-        self.assertEqual(a, memes.pick_memes(self.cfg, 2, "https://ign.com/1"))
-        self.assertEqual(len(set(a)), 2)
-        self.assertNotEqual([p.name for p in memes.pick_memes(self.cfg, 4, "s1")], [p.name for p in memes.pick_memes(self.cfg, 4, "s2")])
 
 
 class MusicLibraryTests(unittest.TestCase):
@@ -291,7 +263,7 @@ class MusicLibraryTests(unittest.TestCase):
         from clipper.render import loudness_after
         got = loudness_after(self.cfg, f, 2.0, 12.0, f"volume={gain:.2f}dB")
         self.assertAlmostEqual(got, music.settings(self.cfg)["track_lufs"], delta=1.0)
-        self.assertTrue(-32.0 <= got <= -28.0, got)                                   # the -28..-32 LUFS bed
+        self.assertTrue(-28.0 <= got <= -24.0, got)                                   # the -24..-28 LUFS bed ([music] track_lufs = -25)
 
 
 class PictureRenderTests(unittest.TestCase):
@@ -318,7 +290,6 @@ class PictureRenderTests(unittest.TestCase):
         self.cfg.data_dir = self.root
         self.cfg.raw = {**self.cfg.raw, "clip": {**self.cfg.raw.get("clip", {}), "min_seconds": 1, "max_seconds": 40},
                         "notify": {"enabled": False}, "music": {"enabled": True, "dir": str(self.root / "music")},
-                        "news": {**self.cfg.raw.get("news", {}), "memes_dir": str(self.root / "memes")},
                         "watermark": {**self.cfg.raw.get("watermark", {}), "file": str(self.root / "wm.png")}}
         self.folder = self.root / "news-ign-1"
         self.folder.mkdir()
@@ -349,14 +320,14 @@ class PictureRenderTests(unittest.TestCase):
                         "-frames:v", "1", str(out)], check=True)
         return cv2.imread(str(out)).astype(int)
 
-    def test_segments_cut_every_four_to_six_seconds_and_cycle_the_visuals(self):
+    def test_segments_cut_every_three_and_a_half_to_five_seconds_and_cycle_the_visuals(self):
         for total in (30.5, 33.0, 35.8, 40.0):
-            segs = news_render.plan_segments(total, 3)
+            segs = news_render.plan_segments(total, 4)
             self.assertAlmostEqual(sum(s for _, s in segs), total, places=6)
-            self.assertTrue(all(4.0 <= s <= 6.0 for _, s in segs), (total, segs))
+            self.assertTrue(all(3.5 <= s <= 5.0 for _, s in segs), (total, segs))
             self.assertTrue(all(a[0] != b[0] for a, b in zip(segs, segs[1:])))       # never the same picture twice in a row
         self.assertEqual({i for i, _ in news_render.plan_segments(33.0, 3)}, {0, 1, 2})
-        self.assertEqual(len(news_render.plan_segments(33.0, 1)), 7)                  # a single picture still gets motion cuts
+        self.assertEqual(len(news_render.plan_segments(33.0, 1)), 8)                  # a single picture still gets motion cuts
 
     def test_motions_are_varied(self):
         self.assertEqual(len({news_render.motion(k, 150) for k in range(5)}), 5)
@@ -364,7 +335,7 @@ class PictureRenderTests(unittest.TestCase):
     def test_multi_picture_short_cuts_between_visuals_with_music(self):
         dur, words = self.voice(long=True)
         r = news_render.render_news_video(self.cfg, self.folder, {**self.info, "images": self.pics(3), "music": self.track}, words, dur)
-        self.assertEqual((r["background"], r["visuals"], r["cuts"]), ("picture", 3, 3))
+        self.assertEqual((r["background"], r["visuals"], r["cuts"]), ("picture", 3, 4))
         self.assertEqual(self.probe(self.folder / "clip.mp4"), "h264,1080,1920,30/1")
         self.assertEqual(r["music"]["title"], "Test Track")
         self.assertEqual(r["music"]["attribution"], ATTRIBUTION)
@@ -372,21 +343,22 @@ class PictureRenderTests(unittest.TestCase):
         self.assertEqual(self.probe(self.folder / "clip.mp4", "stream=codec_name", "a:0"), "aac")
         for left in ("scrim.png", "captions.ass") + tuple(f"visual_{i}.jpg" for i in range(3)):
             self.assertFalse((self.folder / left).exists(), left)
-        # cut points are at ~5.5 s and ~11 s: frames either side of a cut differ a lot, frames within a cut differ little
-        across = np.abs(self.frame(5.3, "a.png") - self.frame(5.8, "b.png")).mean()
-        within = np.abs(self.frame(2.0, "c.png") - self.frame(2.5, "d.png")).mean()
+        # cut points are at ~4.1 s, ~8.3 s and ~12.4 s: frames either side of a cut differ a lot, frames within a cut differ little
+        across = np.abs(self.frame(3.9, "a.png") - self.frame(4.4, "b.png")).mean()
+        within = np.abs(self.frame(1.5, "c.png") - self.frame(2.0, "d.png")).mean()
         self.assertGreater(across, 3 * within)
-        self.assertGreater(float(np.abs(self.frame(0.2, "e.png") - self.frame(5.0, "f.png")).mean()), 1.0)
-        # scrim: the middle of the frame is darker than the raw picture
-        self.assertLess(float(self.frame(2.0, "g.png")[700:900].mean()), float(cv2.imread(str(self.folder / "news_image_1.jpg"))[300:600].mean()))
+        self.assertGreater(float(np.abs(self.frame(0.2, "e.png") - self.frame(3.6, "f.png")).mean()), 1.0)
+        # scrim: the caption zone (dark scrim behind the captions) is darker than the same picture region unscrimmed
+        g = self.frame(1.5, "g.png")
+        self.assertLess(float(g[1500:1750].mean()), float(g[700:1000].mean()))
 
     def test_music_is_far_below_the_voice(self):
         # voice-less render: only the music bed (gain-matched to -29 LUFS) plus a silent voice must sit at -28..-32 LUFS
         gain = music.music_gain_db(self.cfg, self.noise, 3.0, 5.0)
         from clipper.render import loudness_after
         bed = loudness_after(self.cfg, self.noise, 3.0, 5.0, f"volume={gain:.2f}dB")
-        self.assertTrue(-32.0 <= bed <= -28.0, bed)
-        self.assertGreater(-14.0 - bed, 13.0)                                         # at least 13 dB under the voiceover
+        self.assertTrue(-28.0 <= bed <= -24.0, bed)
+        self.assertGreater(-14.0 - bed, 10.0)                                         # at least 10 dB under the voiceover
 
     def test_a_broken_track_is_dropped_but_the_pictures_stay(self):
         dur, words = self.voice()
@@ -395,26 +367,30 @@ class PictureRenderTests(unittest.TestCase):
         self.assertEqual((r["background"], r["music"]), ("picture", None))
         self.assertTrue((self.folder / "clip.mp4").is_file())
 
-    def test_broken_pictures_fall_back_to_gradient_and_keep_the_music(self):
+    def test_one_broken_picture_is_dropped_and_the_rest_still_render(self):
+        dur, words = self.voice()
+        pics = self.pics(3)
+        pics[1].write_bytes(b"not really a jpeg")
+        r = news_render.render_news_video(self.cfg, self.folder, {**self.info, "images": pics, "music": self.track}, words, dur)
+        self.assertEqual((r["background"], r["visuals"], r["music"]["title"]), ("picture", 2, "Test Track"))
+        self.assertEqual(self.probe(self.folder / "clip.mp4"), "h264,1080,1920,30/1")
+
+    def test_with_no_usable_picture_there_is_no_placeholder_render(self):
         dur, words = self.voice()
         pic = self.folder / "news_image_1.jpg"
         pic.write_bytes(b"not really a jpeg")
-        r = news_render.render_news_video(self.cfg, self.folder, {**self.info, "images": [pic], "music": self.track}, words, dur)
-        self.assertEqual((r["background"], r["music"]["title"]), ("gradient", "Test Track"))
-        self.assertEqual(self.probe(self.folder / "clip.mp4"), "h264,1080,1920,30/1")
+        for images in ([pic], [], [self.folder / "missing.jpg"]):
+            with self.assertRaises(news_render.RenderError):
+                news_render.render_news_video(self.cfg, self.folder, {**self.info, "images": images, "music": self.track}, words, dur)
+        self.assertFalse((self.folder / "clip.mp4").exists())
 
-    def test_no_pictures_no_music_is_the_plain_gradient(self):
-        dur, words = self.voice()
-        r = news_render.render_news_video(self.cfg, self.folder, {**self.info, "images": [], "music": None}, words, dur)
-        self.assertEqual((r["background"], r["music"]), ("gradient", None))
-
-    def make_short(self, pictures, track_cfg=True):
+    def make_short(self, pictures, track_cfg=True, topic_pictures=0):
         from tests.test_news import reply, story
         pick = news.validate_reply(json.dumps({"stories": [reply(1)]}), [story(1)], self.cfg)[0]
         pick.story.image_urls = [f"https://cdn.x/p{i}.jpg" for i in range(pictures)]
         pick.story.image_url = pick.story.image_urls[0] if pictures else None
 
-        def fake_dl(url, limit, timeout, truncate=False):
+        def fake_dl(url, limit, timeout, truncate=False, referer=None):
             if url == pick.story.link:
                 return b"<html></html>", "text/html"
             if url in pick.story.image_urls:
@@ -430,7 +406,17 @@ class PictureRenderTests(unittest.TestCase):
             {"file": "bed.mp3", "title": "Test Track", "artist": "Kevin MacLeod", "license": "CC BY 4.0", "attribution": ATTRIBUTION}]}),
             encoding="utf-8")
         words = mock.patch.object(news, "get_words", side_effect=lambda c, m, sc, d: (news.estimate_words(sc, d), "estimated"))
-        with mock.patch.object(newsimage, "download", fake_dl), mock.patch.object(news, "synthesize", synth), words:
+        self.topic_calls = []
+
+        def fake_topic(topic, folder, cache_root, need, known_hashes, start_n, timeout=15.0):
+            self.topic_calls.append((topic, need, start_n))
+            out = []
+            for i in range(min(topic_pictures, need)):
+                f = Path(folder) / f"news_image_{start_n + i}.jpg"
+                f.write_bytes(smooth_jpeg(1600, 900, seed=90 + i))
+                out.append({"file": f, "url": f"https://commons/x{i}.jpg", "source": "commons", "width": 1600, "height": 900})
+            return out
+        with mock.patch.object(newsimage, "download", fake_dl), mock.patch.object(news, "synthesize", synth), words,                 mock.patch.object(imagesearch, "fetch_topic_images", fake_topic):
             return news.make_short(self.cfg, pick)
 
     def test_make_short_three_plus_pictures_music_and_attribution(self):
@@ -446,19 +432,36 @@ class PictureRenderTests(unittest.TestCase):
         row = db.clip_by_folder(self.cfg.database, folder.name)
         self.assertEqual(row["description"].splitlines()[-2:], [ATTRIBUTION, CREDIT])
 
-    def test_make_short_tops_up_with_meme_cards_when_the_article_has_few_pictures(self):
-        folder = self.make_short(pictures=1)
+    def test_make_short_tops_up_with_topic_screenshots_when_the_article_has_few_pictures(self):
+        folder = self.make_short(pictures=1, topic_pictures=5)
         a = json.loads((folder / "analysis.json").read_text(encoding="utf-8"))
         kinds = [i["kind"] for i in a["news"]["images"]]
-        self.assertEqual(kinds, ["article", "meme", "meme"])                          # always at least 3 visuals
-        self.assertEqual(a["render"]["visuals"], 3)
-        self.assertTrue(any((self.root / "memes").glob("card-*.jpg")))
+        self.assertEqual(kinds, ["article", "topic", "topic", "topic", "topic", "topic"])      # article first, then the game
+        self.assertEqual(a["render"]["visuals"], 6)
+        self.assertEqual(self.topic_calls[0][0], "GTA 6")                                  # searched by the pick's main game name
+        self.assertIn("Images: IGN (article pictures)", a["description_full"])
+        self.assertIn("Game screenshots:", a["description_full"])
+        self.assertTrue(a["description_full"].splitlines()[-1].startswith("Sources & Credits:"))
 
-    def test_make_short_with_no_pictures_found_uses_three_memes(self):
-        folder = self.make_short(pictures=0)
+    def test_four_article_pictures_need_no_search(self):
+        folder = self.make_short(pictures=4)
         a = json.loads((folder / "analysis.json").read_text(encoding="utf-8"))
-        self.assertEqual([i["kind"] for i in a["news"]["images"]], ["meme"] * 3)
-        self.assertNotIn("Images: IGN", a["description_full"])                        # no article pictures -> no image credit
+        self.assertEqual(self.topic_calls, [])
+        self.assertEqual(a["render"]["visuals"], 4)
+        self.assertNotIn("Game screenshots:", a["description_full"])
+
+    def test_too_few_real_pictures_skips_the_story_instead_of_showing_placeholders(self):
+        with self.assertRaises(news.NewsError) as ctx:
+            self.make_short(pictures=1, topic_pictures=1)                                 # 2 real pictures < images_floor (3)
+        self.assertIn("placeholders", str(ctx.exception))
+        row = db.clip_by_folder(self.cfg.database, next(self.cfg.clips_dir.iterdir()).name)
+        self.assertEqual(row["status"], "failed")
+        self.assertFalse(list(self.cfg.clips_dir.glob("*/clip.mp4")))
+
+    def test_no_generated_card_code_is_left(self):
+        import clipper
+        self.assertFalse((Path(clipper.__file__).parent / "memes.py").exists())
+        self.assertFalse(hasattr(news_render, "background_source"))
 
     def test_music_off_means_no_attribution_line(self):
         self.cfg.raw = {**self.cfg.raw, "music": {"enabled": False, "dir": str(self.root / "music")}}
@@ -508,7 +511,7 @@ class QuotaTests(unittest.TestCase):
             seen["n"] = n
             return news.validate_reply(json.dumps({"stories": [reply(1)]}), [story(1)], cfg)
         with mock.patch.object(news, "fetch_stories", return_value=[story(1)]), mock.patch.object(news, "pick_stories", fake_pick):
-            res = news.run_news(self.cfg, dry_run=True, **kw)
+            res = news.run_news(self.cfg, trends=False, dry_run=True, **kw)
         return res, seen
 
     def test_scheduled_runs_stop_at_the_daily_quota(self):

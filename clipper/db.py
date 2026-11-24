@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS seen_stories (
     reason     TEXT,                          -- rejected | uploaded | cleaned
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS news_topics (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    topics     TEXT NOT NULL,                 -- comma-separated topic keys of one made Short ('gta', 'elden ring')
+    title      TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 # Columns added after the first version. init_db() adds whichever are missing, so old databases keep working.
@@ -407,6 +413,22 @@ def recent_news_titles(db_path: Path, since_utc: str) -> list[str]:
         return [r["title"] for r in conn.execute(
             "SELECT title FROM clips WHERE platform = 'news' AND title IS NOT NULL AND status != 'failed'"
             " AND created_at >= ? ORDER BY id DESC", (since_utc,))]
+
+
+def add_topics(db_path: Path, topics: list[str], title: str | None) -> None:
+    """Remember the game / franchise topics of a news Short that was just made (kept even after Reject / Uploaded)."""
+    if not topics:
+        return
+    init_db(db_path)
+    with connect(db_path) as conn:
+        conn.execute("INSERT INTO news_topics (topics, title) VALUES (?, ?)", (",".join(topics), title))
+
+
+def recent_topics(db_path: Path, since_utc: str) -> list[str]:
+    """Comma-joined topic keys of the news Shorts made since `since_utc`."""
+    init_db(db_path)
+    with connect(db_path) as conn:
+        return [r["topics"] for r in conn.execute("SELECT topics FROM news_topics WHERE created_at >= ?", (since_utc,))]
 
 
 def news_urls_seen(db_path: Path) -> set[str]:

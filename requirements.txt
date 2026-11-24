@@ -3,3 +3,8 @@ feedparser>=6.0
 websockets>=13
 opencv-python-headless>=4.9,<5
 edge-tts>=7.0
+yt-dlp
+beautifulsoup4>=4.12
+lxml>=5
+ddgs>=9
+pillow>=10

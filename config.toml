@@ -87,11 +87,13 @@ corner = "left"                    # "left" or "right"; bottom, above the y=1450
 [news]
 hours = 12                         # only stories newer than this
 stories = 4                        # news Shorts per run (repeat stories are skipped: same URL, same headline, same event)
-images = true                      # cut between the article's real pictures (3-5, with Ken Burns); false = gradient only
-images_min = 3                     # fewer real pictures than this -> topped up with the meme cards in assets/memes/
-images_max = 5
-image_timeout = 15                 # seconds per picture / article-page download
-memes_dir = "assets/memes"         # your own gameplay / meme images go here (original reaction cards are generated if empty)
+images_min = 4                     # fewer unique real pictures than this -> topped up with topic-matched game screenshots
+images_max = 6                     # 4-6 real pictures per Short, cut every 3.5-5 s (never generated cards or text slides)
+images_floor = 3                   # still fewer than this after the screenshot search -> the story is skipped
+image_timeout = 15                 # seconds per picture / article-page download (each is retried)
+# Article pictures: og:image, twitter:image, <picture>/srcset/data-src and in-article <img> (width >= 600 px, no logos/ads).
+# Top-up pictures: "<game> screenshot" / "<game> gameplay" via ddgs (DuckDuckGo Images) + Wikimedia Commons, cached in
+# data/image_cache/<game>/ and validated with PIL + OpenCV before use.
 script_min_words = 80
 script_max_words = 105             # ~35 seconds spoken
 target_seconds = 35
@@ -102,6 +104,16 @@ groq_model = "whisper-large-v3-turbo"   # word timestamps (GROQ_API_KEY in .env)
 max_candidates = 40                # newest headlines shown to Claude
 auto_run = true                    # `run` / run.bat also makes news Shorts at the times below
 run_times = ["07:30", "13:30", "19:30"]   # local (Melbourne) time
+
+# ---- Trend discovery: python -m clipper trends (also at the end of every `news` run) ----
+# Reads public metadata only (YouTube search via yt-dlp, GamerPower giveaways). Claude verifies the core fact and rewrites it
+# from scratch in Game On's voice; no third-party video, audio or thumbnail is ever used. Needs: pip install yt-dlp.
+[trends]
+enabled = true
+per_run = 1                        # trend Shorts made at the end of each news run
+min_views = 20000                  # ignore videos below this many views
+giveaways = true                   # also look at live free-game giveaways (GamerPower)
+queries = ["gaming easter egg shorts", "video game secret shorts", "gaming news shorts", "free steam games shorts", "patch notes surprise gaming shorts", "gaming facts shorts"]
 
 # ---- `python -m clipper clean`: delete old clip folders + rows (exports are never touched) ----
 [clean]
@@ -199,23 +211,76 @@ handle = "PlayStation"
 url = "https://www.youtube.com/@PlayStation/live"
 lang = "en"
 
-# ---- Gaming news RSS feeds ----
-[[feeds]]
+# ---- Gaming news RSS feeds: PC, PlayStation, Xbox, Nintendo, Steam / free games, esports ----
+# (Live free-game giveaways from GamerPower and viral-topic pointers come in through [trends] below.)
+[[news.feeds]]
 name = "IGN"
 url = "https://feeds.feedburner.com/ign/all"
 
-[[feeds]]
+[[news.feeds]]
 name = "GameSpot"
 url = "https://www.gamespot.com/feeds/mashup/"
 
-[[feeds]]
+[[news.feeds]]
 name = "PC Gamer"
 url = "https://www.pcgamer.com/rss/"
 
-[[feeds]]
+[[news.feeds]]
+name = "Kotaku"
+url = "https://kotaku.com/rss"
+
+[[news.feeds]]
+name = "Polygon"
+url = "https://www.polygon.com/rss/index.xml"
+
+[[news.feeds]]
+name = "Eurogamer"
+url = "https://www.eurogamer.net/feed"
+
+[[news.feeds]]
+name = "Nintendo Life"
+url = "https://www.nintendolife.com/feeds/latest"
+
+[[news.feeds]]
+name = "Push Square"
+url = "https://www.pushsquare.com/feeds/latest"
+
+[[news.feeds]]
 name = "PlayStation Blog"
 url = "https://blog.playstation.com/feed/"
 
-[[feeds]]
+[[news.feeds]]
 name = "Xbox Wire"
 url = "https://news.xbox.com/en-us/feed/"
+
+[[news.feeds]]
+name = "VG247"
+url = "https://www.vg247.com/feed"
+
+[[news.feeds]]
+name = "Rock Paper Shotgun"
+url = "https://www.rockpapershotgun.com/feed"
+
+[[news.feeds]]
+name = "PCGamesN"
+url = "https://www.pcgamesn.com/mainrss.xml"
+
+[[news.feeds]]
+name = "GamingOnLinux (Steam / Deck)"
+url = "https://www.gamingonlinux.com/article_rss.php"
+
+[[news.feeds]]
+name = "HLTV (esports)"
+url = "https://www.hltv.org/rss/news"
+
+[[news.feeds]]
+name = "Esports Insider"
+url = "https://www.esportsinsider.com/feed"
+
+[[news.feeds]]
+name = "Esports.gg"
+url = "https://esports.gg/feed/"
+
+[[news.feeds]]
+name = "Dexerto"
+url = "https://www.dexerto.com/feed/"

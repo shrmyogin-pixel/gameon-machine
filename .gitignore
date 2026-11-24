@@ -4,4 +4,3 @@ data/
 __pycache__/
 *.pyc
 assets/music/*.mp3
-assets/memes/card-*.jpg

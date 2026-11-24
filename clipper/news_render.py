@@ -1,8 +1,9 @@
 """Render a news Short: voiceover + background music + cutting visuals + dark scrim + headline card + watermark + captions.
 
-The background is 3-5 distinct pictures (the article's own, see newsimage.py, topped up with the meme cards from
-memes.py) with a cut every ~5 seconds, each under a different slow Ken Burns zoom/pan and a dark scrim; with no
-usable picture (or if ffmpeg cannot use them) it is an original animated gradient. Under the voiceover (-14 LUFS)
+The background is 4-6 distinct REAL pictures (the article's own, see newsimage.py, topped up with topic-matched game
+screenshots from imagesearch.py) with a clean cut every 3.5-5 seconds, each under a slow, subtle Ken Burns zoom/pan and
+a dark scrim. There is never a gradient, text slide or generated placeholder behind the Short: a picture that cannot be
+decoded is dropped, and with none left the render fails (the story is skipped). Under the voiceover (-14 LUFS)
 a Creative Commons track sits at about -25 LUFS (music.py) and the final mix is normalized to -14 LUFS. On top: the
 hook, a kicker ("BREAKING NEWS" / "FREE GAME OFFER"), the story headline, the 3-word bold captions and the source
 outlet. It goes through the same hardware-encoder / below-normal-priority / one-render-at-a-time path as live
@@ -25,13 +26,14 @@ log = logging.getLogger("clipper")
 
 TAIL_SECONDS = 0.5             # picture stays up a moment after the voice ends
 FPS = 30
-PICTURE_TIMEOUT = 600          # a picture render that takes longer than this is stuck: fall back to the gradient
-KB_ZOOM = 0.14                 # Ken Burns: zoom grows from 1.00x to 1.14x within a cut (subtle)
+PICTURE_TIMEOUT = 600          # a picture render that takes longer than this is stuck
+KB_ZOOM = 0.08                 # Ken Burns: zoom grows from 1.00x to 1.08x within a cut (subtle, no shaky crops)
 CYAN, MAGENTA, YELLOW, WHITE, NAVY = "&H00FFF000&", "&H00D62BFF&", "&H0000F2FF&", "&H00FFFFFF&", "&H00300A14&"   # Tokyo Neon (BGR)
 KICKER_Y, NEWS_HOOK_Y = 150, 235      # kicker chip then the big hook, both below the Shorts top bar
-CUT_SECONDS = 4.5              # a cut about every 4-5 s
+CUT_SECONDS = 4.2              # target length of a cut
+MIN_CUT, MAX_CUT = 3.5, 5.0    # every cut lasts between these
 XFADE = 0.4                    # seconds each transition overlaps the next picture
-TRANSITIONS = ["fade", "slideleft", "circleopen", "wipeleft", "smoothleft", "zoomin", "fadeblack", "slideup"]
+TRANSITIONS = ["fade", "smoothleft", "slideleft", "smoothright", "wipeleft"]      # clean and calm: no spinning / zooming wipes
 
 
 def build_news_ass(info: dict, words: list, dur: float) -> str:
@@ -40,7 +42,7 @@ def build_news_ass(info: dict, words: list, dur: float) -> str:
     hook = _ass_text(mask(info["hook"]).upper())
     n = len(words_of(hook))
     hook_size = 118 if n <= 5 else 104 if n <= 8 else 90
-    kicker = {"free_offer": "FREE GAME OFFER"}.get(info.get("kind"), "BREAKING NEWS")
+    kicker = {"free_offer": "FREE GAME OFFER", "trend": "TRENDING NOW"}.get(info.get("kind"), "BREAKING NEWS")
     source = _ass_text(mask(f"Source: {info['outlet']}"))
     total = dur + TAIL_SECONDS
     header = f"""[Script Info]
@@ -73,12 +75,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return header + "\n".join(lines) + "\n"
 
 
-def background_source(total: float) -> list:
-    """ffmpeg input args for the animated gradient background (falls back to a flat colour if unavailable)."""
-    return ["-f", "lavfi", "-i",
-            f"gradients=s={W}x{H}:d={total:.3f}:r=30:c0=0x0b1226:c1=0x1d2a6e:c2=0x0a4a66:nb_colors=3:speed=0.03:type=linear"]
-
-
 def scrim_png(path: Path) -> Path:
     """Full-frame RGBA scrim: dark overall, darker behind the hook (top), headline and captions, lighter in between
     so the picture still shows. Written with OpenCV/numpy (both already dependencies)."""
@@ -95,9 +91,13 @@ def scrim_png(path: Path) -> Path:
 
 
 def plan_segments(total: float, n_visuals: int, target: float = CUT_SECONDS) -> list[tuple[int, float]]:
-    """[(visual index, seconds)] covering `total`: a cut about every `target` seconds (4-6 s), cycling the visuals
-    so the same one never plays twice in a row (when there are at least two)."""
+    """[(visual index, seconds)] covering `total`: a cut every MIN_CUT-MAX_CUT seconds (about `target`), cycling the
+    visuals so the same one never plays twice in a row (when there are at least two)."""
     n_seg = max(1, round(total / target))
+    while n_seg > 1 and total / n_seg < MIN_CUT:
+        n_seg -= 1
+    while total / n_seg > MAX_CUT:
+        n_seg += 1
     seg = total / n_seg
     order = [i % max(n_visuals, 1) for i in range(n_seg)]
     return [(idx, seg) for idx in order]
@@ -151,27 +151,39 @@ def motion(kind: int, frames: int) -> str:
 def render_news_video(cfg: Config, folder: Path, info: dict, words: list, dur: float) -> dict:
     """voiceover.mp3 + words -> clip.mp4 + thumb.jpg in `folder`. Raises RenderError.
 
-    info['images'] = picture files to cut between (see newsimage.py / memes.py); info['music'] = a track from
-    music.py (or None). If the picture render fails for any reason it is retried without the music, and then with
-    the gradient background, so a bad picture or track never loses the Short."""
-    images = [Path(p) for p in (info.get("images") or ([info["image"]] if info.get("image") else [])) if Path(p).is_file()]
+    info['images'] = real picture files to cut between (see newsimage.py / imagesearch.py); info['music'] = a track
+    from music.py (or None). Pictures that cannot be decoded are dropped first (never a blank frame); if the render
+    fails it is retried once without the music. With no usable picture at all it raises: there is no placeholder."""
+    images = usable_pictures(info.get("images") or ([info["image"]] if info.get("image") else []))
+    if not images:
+        raise RenderError("no usable real picture to show (placeholders are not allowed)")
     music = info.get("music")
-    attempts, seen = [], set()
-    for vis in (images, []):                                    # richest first: pictures + music, then simpler
-        for trk in (music, None):
-            key = (bool(vis), bool(trk))
-            if key not in seen:
-                seen.add(key)
-                attempts.append((vis, trk))
     last = None
-    for visuals, track in attempts:
+    for track in ([music, None] if music else [None]):
         try:
-            return _render(cfg, folder, info, words, dur, visuals, track)
+            return _render(cfg, folder, info, words, dur, images, track)
         except RenderError as exc:
             last = exc
-            log.warning("[%s] render with %d picture(s)%s failed (%s); trying a simpler one", folder.name, len(visuals),
+            log.warning("[%s] render with %d picture(s)%s failed (%s)", folder.name, len(images),
                         " + music" if track else "", str(exc)[:200])
     raise last or RenderError("render failed")
+
+
+def usable_pictures(files) -> list[Path]:
+    """The files that exist and really decode as a picture big enough to fill a Short (the rest are dropped)."""
+    import cv2
+    out = []
+    for f in files:
+        f = Path(f)
+        try:
+            img = cv2.imread(str(f)) if f.is_file() else None
+        except Exception:
+            img = None
+        if img is not None and img.shape[1] >= 600 and img.shape[0] >= 300:
+            out.append(f)
+        else:
+            log.warning("news render: dropped unusable picture %s", f.name)
+    return out
 
 
 def _render(cfg: Config, folder: Path, info: dict, words: list, dur: float, visuals: list[Path], track: dict | None) -> dict:
@@ -188,37 +200,34 @@ def _render(cfg: Config, folder: Path, info: dict, words: list, dur: float, visu
     sub = f"ass=filename='{_fp(ass)}':fontsdir='{_fp(Path(FONT_DIRS))}'"
     encoder = pick_encoder(cfg)
     seed = sum(map(ord, folder.name))
-    segs = plan_segments(total, len(visuals)) if visuals else []
+    if not visuals:
+        raise RenderError("no usable real picture to show (placeholders are not allowed)")
+    segs = plan_segments(total, len(visuals))
     music_info = None
     try:
         args: list = []
-        if visuals:
-            scrim_png(scrim)
-            chains = []
-            k = len(segs)
-            xf = XFADE if k > 1 else 0.0
-            cuts = [sum(sec for _, sec in segs[:i]) for i in range(k + 1)]      # cut times T_0..T_k (T_k = total)
-            for i, (vi, seconds) in enumerate(segs):
-                # each picture runs a little past its cut so the next one can fade/slide in over it
-                n = round((seconds + (xf if i < k - 1 else 0.0)) * FPS)
-                anchors = (0.5, 0.3, 0.7, 0.45, 0.6)
-                vis = prep_visual(visuals[vi], folder / f"visual_{i}.jpg", anchors[(seed + i) % len(anchors)])
-                made.append(vis)
-                args += ["-loop", "1", "-framerate", str(FPS), "-t", f"{n / FPS:.3f}", "-i", vis]
-                chains.append(f"[{i}:v]zoompan={motion(seed + i, n)}:d=1:s={W}x{H}:fps={FPS},eq=saturation=1.2:contrast=1.08:brightness=0.02,"
-                               f"setsar=1,format=yuv420p[z{i}]")
-            args += ["-i", mp3, "-i", scrim]
-            voice_idx, scrim_idx, next_idx = k, k + 1, k + 2
-            joins, prev = [], "z0"
-            for i in range(1, k):                                   # varied transition at every cut
-                name = TRANSITIONS[(seed + i) % len(TRANSITIONS)]
-                joins.append(f"[{prev}][z{i}]xfade=transition={name}:duration={xf}:offset={cuts[i]:.3f}[x{i}]")
-                prev = f"x{i}"
-            head = (";".join(chains + joins) + f";[{prev}][{scrim_idx}:v]overlay=0:0:format=auto[vs]")
-        else:
-            args += [*background_source(total), "-i", mp3]
-            voice_idx, next_idx = 1, 2
-            head = "[0:v]null[vs]"
+        scrim_png(scrim)
+        chains = []
+        k = len(segs)
+        xf = XFADE if k > 1 else 0.0
+        cuts = [sum(sec for _, sec in segs[:i]) for i in range(k + 1)]      # cut times T_0..T_k (T_k = total)
+        for i, (vi, seconds) in enumerate(segs):
+            # each picture runs a little past its cut so the next one can fade/slide in over it
+            n = round((seconds + (xf if i < k - 1 else 0.0)) * FPS)
+            anchors = (0.5, 0.3, 0.7, 0.45, 0.6)
+            vis = prep_visual(visuals[vi], folder / f"visual_{i}.jpg", anchors[(seed + i) % len(anchors)])
+            made.append(vis)
+            args += ["-loop", "1", "-framerate", str(FPS), "-t", f"{n / FPS:.3f}", "-i", vis]
+            chains.append(f"[{i}:v]zoompan={motion(seed + i, n)}:d=1:s={W}x{H}:fps={FPS},eq=saturation=1.2:contrast=1.08:brightness=0.02,"
+                           f"setsar=1,format=yuv420p[z{i}]")
+        args += ["-i", mp3, "-i", scrim]
+        voice_idx, scrim_idx, next_idx = k, k + 1, k + 2
+        joins, prev = [], "z0"
+        for i in range(1, k):                                   # varied transition at every cut
+            name = TRANSITIONS[(seed + i) % len(TRANSITIONS)]
+            joins.append(f"[{prev}][z{i}]xfade=transition={name}:duration={xf}:offset={cuts[i]:.3f}[x{i}]")
+            prev = f"x{i}"
+        head = (";".join(chains + joins) + f";[{prev}][{scrim_idx}:v]overlay=0:0:format=auto[vs]")
         voice_chain = audio_chain(cfg, mp3, 0.0, dur)
         if track:
             tpath = Path(track["path"])
@@ -249,7 +258,7 @@ def _render(cfg: Config, folder: Path, info: dict, words: list, dur: float, visu
         out, tmp = folder / "clip.mp4", folder / "clip.part.mp4"
         try:
             with _slot(cfg):
-                _ffmpeg(cfg, [*args, tmp], timeout=PICTURE_TIMEOUT if visuals else 1800)
+                _ffmpeg(cfg, [*args, tmp], timeout=PICTURE_TIMEOUT)
             tmp.replace(out)
             _ffmpeg(cfg, ["-ss", "1.5", "-i", out, "-frames:v", "1", "-q:v", "2", folder / "thumb.jpg"])
         finally:
@@ -264,5 +273,5 @@ def _render(cfg: Config, folder: Path, info: dict, words: list, dur: float, visu
              folder.name, encoder, total, len(visuals), len(segs), music_info["title"] if music_info else "none",
              f"{final:.1f}" if final is not None else "?", "on" if wm else "off")
     return {"layout": "news", "encoder": encoder, "duration_s": round(total, 2), "watermark": bool(wm),
-            "background": "picture" if visuals else "gradient", "visuals": len(visuals), "cuts": len(segs),
+            "background": "picture", "visuals": len(visuals), "cuts": len(segs),
             "music": music_info, "final_lufs": round(final, 1) if final is not None else None}

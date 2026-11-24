@@ -13,9 +13,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+import cv2
 import feedparser
+import numpy as np
 
-from clipper import db, hookscore, news, news_render, newsimage
+from clipper import db, hookscore, imagesearch, news, news_render, newsimage
 from clipper.config import load_config
 from clipper.hookscore import best_hook, rank_hooks, score_hook
 
@@ -26,6 +28,18 @@ def rss(items):
     body = "".join(f"<item><title>{t}</title><link>{l}</link><description>{d}</description>"
                    f"<pubDate>{p:%a, %d %b %Y %H:%M:%S} GMT</pubDate></item>" for t, l, d, p in items)
     return feedparser.parse(f"<?xml version='1.0'?><rss version='2.0'><channel><title>x</title>{body}</channel></rss>")
+
+
+def fake_article_pictures(story, folder, timeout=15.0, want=5):
+    """Stands in for the article scraper: four soft, photo-like pictures saved the way newsimage saves them."""
+    out = []
+    for i in range(4):
+        rng = np.random.default_rng(40 + i)
+        img = cv2.GaussianBlur(cv2.resize(rng.integers(0, 255, (6, 10, 3), dtype=np.uint8), (1600, 900), interpolation=cv2.INTER_CUBIC), (0, 0), 25)
+        f = Path(folder) / f"news_image_{i + 1}.jpg"
+        cv2.imwrite(str(f), img)
+        out.append({"file": f, "url": f"https://cdn.x/p{i}.jpg", "source": "feed", "width": 1600, "height": 900})
+    return out
 
 
 # ---------------------------------------------------------------- hook scoring
@@ -103,7 +117,7 @@ class FeedTests(unittest.TestCase):
             db.set_clip_status(cfg.database, "news-1", "rendered")
             db.add_clip(cfg.database, "news", "IGN", "news-2", source_url="https://ign.com/failed-before")
             db.set_clip_status(cfg.database, "news-2", "failed", "boom")
-            cfg.raw = {**cfg.raw, "feeds": [{"name": "IGN", "url": "u1"}, {"name": "PCG", "url": "u2"}, {"name": "Dead", "url": "u3"}]}
+            cfg.raw = {**cfg.raw, "news": {**cfg.raw.get("news", {}), "feeds": [{"name": "IGN", "url": "u1"}, {"name": "PCG", "url": "u2"}, {"name": "Dead", "url": "u3"}]}}
             feeds = {"u1": rss([("Used story", "https://ign.com/used", "", NOW - timedelta(hours=1)),
                                 ("Retry me", "https://ign.com/failed-before", "", NOW - timedelta(hours=2)),
                                 ("Best casino bonuses", "https://ign.com/casino", "", NOW - timedelta(hours=1)),
@@ -135,7 +149,7 @@ class FeedTests(unittest.TestCase):
             # the story is remembered by its normalized URL (tracking parameters and www. do not matter) ...
             db.add_seen(cfg.database, lifecycle.story_keys("https://www.ign.com/a/old-story/?utm_source=x", "Old story headline here"),
                         "https://www.ign.com/a/old-story/", "Old story headline here", "rejected")
-            cfg.raw = {**cfg.raw, "feeds": [{"name": "IGN", "url": "u1"}, {"name": "PCG", "url": "u2"}]}
+            cfg.raw = {**cfg.raw, "news": {**cfg.raw.get("news", {}), "feeds": [{"name": "IGN", "url": "u1"}, {"name": "PCG", "url": "u2"}]}}
             feeds = {"u1": rss([("Brand new thing", "https://ign.com/a/old-story?fbclid=zzz", "", NOW - timedelta(hours=1)),
                                 ("Fresh one today", "https://ign.com/a/fresh", "", NOW - timedelta(hours=2))]),
                      # ... or by its headline (another outlet, another URL)
@@ -391,11 +405,17 @@ class MakeShortTests(unittest.TestCase):
         self.cfg.data_dir = root
         self.cfg.raw = {**self.cfg.raw, "clip": {**self.cfg.raw.get("clip", {}), "min_seconds": 1, "max_seconds": 40},
                         "notify": {"enabled": False}, "watermark": {**self.cfg.raw.get("watermark", {}), "file": str(root / "wm.png")},
-                        "news": {**self.cfg.raw.get("news", {}), "memes_dir": str(root / "memes")},
                         "music": {"enabled": False}}          # music + pictures have their own tests (test_newsimage.py)
         patcher = mock.patch.object(newsimage, "download", side_effect=OSError("offline in tests"))
         patcher.start()
         self.addCleanup(patcher.stop)
+        for name in ("search_ddgs", "search_commons"):                      # never touch the network
+            p2 = mock.patch.object(imagesearch, name, return_value=[])
+            p2.start()
+            self.addCleanup(p2.stop)
+        p3 = mock.patch.object(news, "fetch_news_images", side_effect=fake_article_pictures)    # 4 real-looking pictures
+        p3.start()
+        self.addCleanup(p3.stop)
 
     def pick(self, sid=1, outlet="IGN"):
         return news.validate_reply(json.dumps({"stories": [reply(sid)]}), [story(sid, outlet)], self.cfg)[0]
@@ -467,7 +487,7 @@ class MakeShortTests(unittest.TestCase):
                 mock.patch.object(news, "pick_stories", return_value=picks), \
                 mock.patch.object(news, "synthesize", synth), \
                 mock.patch.object(news, "get_words", side_effect=lambda cfg, mp3, script, dur: (news.estimate_words(script, dur), "estimated")):
-            res = news.run_news(self.cfg)
+            res = news.run_news(self.cfg, trends=False)
         self.assertEqual((len(res.made), len(res.failed)), (1, 1))
         rows = {r["handle"]: r for r in db.list_clips(self.cfg.database)}
         self.assertEqual(rows["IGN"]["status"], "failed")
@@ -477,20 +497,20 @@ class MakeShortTests(unittest.TestCase):
     def test_dry_run_writes_nothing(self):
         picks = news.validate_reply(json.dumps({"stories": [reply(1)]}), [story(1)], self.cfg)
         with mock.patch.object(news, "fetch_stories", return_value=[story(1)]), mock.patch.object(news, "pick_stories", return_value=picks):
-            res = news.run_news(self.cfg, dry_run=True)
+            res = news.run_news(self.cfg, trends=False, dry_run=True)
         self.assertEqual((len(res.picked), len(res.made)), (1, 0))
         self.assertEqual(db.list_clips(self.cfg.database), [])
 
     def test_no_fresh_stories_is_not_an_error(self):
         with mock.patch.object(news, "fetch_stories", return_value=[]):
-            res = news.run_news(self.cfg)
+            res = news.run_news(self.cfg, trends=False)
         self.assertIn("no fresh stories", res.note)
 
     def test_claude_failure_is_reported_not_raised(self):
         from clipper.editor import EditorError
         with mock.patch.object(news, "fetch_stories", return_value=[story(1)]), \
                 mock.patch("clipper.editor.call_claude", side_effect=EditorError("claude timed out")):
-            res = news.run_news(self.cfg)
+            res = news.run_news(self.cfg, trends=False)
         self.assertTrue(res.note.startswith("run failed"))
         self.assertEqual(res.made, [])
 

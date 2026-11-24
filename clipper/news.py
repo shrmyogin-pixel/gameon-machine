@@ -42,7 +42,7 @@ GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 FALLBACK_VOICES = ("en-US-BrianNeural", "en-US-GuyNeural", "en-US-AriaNeural")   # all neutral, tried in order
 TTS_DEADLINE_SECONDS = 150
 HARD_SKIP = re.compile(r"\b(casino|casinos|sportsbook|betting|gambling|gamble|bet365|online slots|poker site)\b", re.I)
-KINDS = {"news": "BREAKING NEWS", "free_offer": "FREE GAME OFFER"}
+KINDS = {"news": "BREAKING NEWS", "free_offer": "FREE GAME OFFER", "trend": "TRENDING NOW"}
 
 
 class NewsError(Exception):
@@ -59,6 +59,7 @@ class Story:
     published: datetime
     image_url: str | None = None      # the first picture the RSS feed itself carries (if any)
     image_urls: list = field(default_factory=list)   # every picture the feed entry carries
+    trend: dict | None = None         # set for trend-discovery items: {'source': 'youtube'|'giveaway', 'signal': ...}
 
 
 @dataclass
@@ -79,6 +80,8 @@ class Pick:
     sensitive: bool
     sensitive_reason: str
     reason: str
+    major_new: bool = False        # Claude says: a completely new major announcement (may repeat a topic covered < 24 h ago)
+    core_fact: str = ""            # trend items: the one verified fact the Short is built on
 
 
 @dataclass
@@ -163,13 +166,13 @@ CANDIDATE STORIES (all published in the last {hours} hours): id | outlet | age |
 {rows}
 {covered}
 TASK
-Choose the {n} best stories to turn into 35-second Shorts. Prefer, in order: breaking gaming news and official reveals; free game offers (Epic, Steam, PS Plus, Game Pass, Prime Gaming ...) that are live right now; confirmed leaks (labelled as leaks); big patch or update news. Pick different games, never two stories about the same thing, and never an event the channel already covered (listed above, if any), even when a different outlet reports it. Skip real-money gambling or betting, hate or harassment, anything about minors, graphic violence, and pure opinion / guide / review pieces.
+Choose the {n} best stories to turn into 35-second Shorts. Prefer, in order: breaking gaming news and official reveals; free game offers (Epic, Steam, PS Plus, Game Pass, Prime Gaming ...) that are live right now; confirmed leaks (labelled as leaks); big patch or update news. STRICT TOPIC DIVERSITY: pick stories about DIFFERENT games / franchises / platforms - never more than ONE story about the same game or franchise (e.g. at most one GTA 6 story, however many are listed). Never repeat an event the channel already covered (listed above, if any), even from a different outlet, and avoid any game / franchise already covered in the last 24 hours - unless the story is a completely NEW major announcement (new reveal, release date, delay), in which case set "major_new": true. Prefer variety across PC, PlayStation, Xbox, Nintendo, free games and esports. Skip real-money gambling or betting, hate or harassment, anything about minors, graphic violence, and pure opinion / guide / review pieces.
 Use ONLY facts found in the headline and summary. Never invent dates, prices, names or details; if a detail (such as an end date) is not given, leave it out. Say "reportedly", "leak" or "rumour" for anything unconfirmed.
 
 FOR EACH STORY write:
-- script_body: the spoken script AFTER the hook, {bmin}-{bmax} words. Short sentences, active voice, plain text only (no emoji, no hashtags, no stage directions, no markdown): core facts, then one line on why it matters, then one short closing line. Do not repeat the hook. No profanity.
+- script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: concrete details FIRST (price, date, platform, number, name), punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler openers or closers. Then one line on why it matters, then one short closing line. NEVER repeat the headline or the hook: do not reuse 5 or more words in a row from the story's headline, say it in your own words. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
 - hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must name the game, platform or store inside its FIRST 6 WORDS and carry urgency or the news itself in those same first words (free, today, now, leak, confirmed, officially, delayed ...). Use 5 different angles. No banned filler.
-- subjects: the game / platform / store names exactly as they appear in your hooks (1-4 short strings).
+- subjects: the game / platform / store names exactly as they appear in your hooks (1-4 short strings). Put the MAIN GAME'S proper title first (e.g. "Alan Wake 2"): it is used to search for matching screenshots.
 - headline: the on-screen headline card, max 70 characters, no emoji, no profanity.
 - title: video title, 25-60 characters, game or platform within its first 4 words, no emoji.
 - description: one line, max 90 characters.
@@ -179,7 +182,35 @@ FOR EACH STORY write:
 - reason: one sentence on why you chose it.
 
 Reply with STRICT JSON only (no prose, no code fences):
-{"stories": [{"id": 3, "kind": "news", "score": 8, "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "reason": "..."}]}"""
+{"stories": [{"id": 3, "kind": "news", "score": 8, "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "reason": "..."}]}"""
+
+TREND_PROMPT = """You are the news editor and scriptwriter of Game On, a gaming news YouTube Shorts channel.
+
+VOICE AND SCRIPT RULES (voice.md - follow them exactly):
+{voice}
+
+TRENDING GAMING TOPICS: id | source | signal | title / text. These are public pointers to what gamers are watching and grabbing right now (a popular gaming video's title with its view count, or a live free-game giveaway). You do NOT have the video or its footage and must not describe it.
+{rows}
+{covered}
+TASK
+Choose up to {n} topics worth an ORIGINAL 35-second Game On Short (viral gaming facts, easter eggs, free games, patch surprises, release details). For each one:
+1. Identify the core gaming fact behind the topic (core_fact: one plain sentence).
+2. VERIFY it: set "verified": true ONLY if the fact is stated in the row itself or is well-established gaming knowledge you are confident is true. If you are not sure, or it is clickbait with no concrete fact, do not pick it.
+3. Rewrite it COMPLETELY in Game On's voice. Do not copy or closely echo the original title or its wording, do not name or quote the creator, do not describe the original video. Add context or why it matters so the Short is original commentary.
+Use ONLY facts you can stand behind; never invent dates, prices or names; say "reportedly" for anything unconfirmed. STRICT TOPIC DIVERSITY: different games each, never two on the same game or franchise, and avoid games already covered in the last 24 hours (unless a completely new major announcement: "major_new": true). Skip real-money gambling or betting, hate or harassment, anything about minors, graphic violence.
+
+FOR EACH TOPIC write:
+- script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: the concrete fact FIRST, punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler. Then why it matters, then one short closing line. Never reuse 5 or more words in a row from the topic's title. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
+- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must name the game, platform or store inside its FIRST 6 WORDS and carry urgency or the surprise itself in those first words. 5 different angles. No banned filler.
+- subjects: the game / platform / store names exactly as they appear in your hooks (1-4 short strings). Put the MAIN GAME'S proper title first (e.g. "Alan Wake 2"): it is used to search for matching screenshots.
+- headline: max 70 characters, no emoji. title: 25-60 characters, game or platform within its first 4 words, no emoji. description: one line, max 90 characters.
+- tags: 8-15 search tags. hashtags: 3-6 hashtags that start with #.
+- kind: "trend" or "free_offer".  score: 0-10.  verified: true/false.  core_fact: the fact.  major_new: true/false.
+- sensitive: true only when a human should look carefully (add sensitive_reason), else false.
+- reason: one sentence on why you chose it.
+
+Reply with STRICT JSON only (no prose, no code fences):
+{"stories": [{"id": 3, "kind": "trend", "score": 8, "verified": true, "core_fact": "...", "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "reason": "..."}]}"""
 
 RETRY_NOTE = ("\n\nYour previous reply was rejected: {why}. Reply again with ONLY the JSON object "
               "- no prose, no markdown, no code fences.")
@@ -198,17 +229,22 @@ def covered_block(cfg: Config, now: datetime) -> str:
         return ""
     if not titles:
         return ""
-    return "\nALREADY MADE IN THE LAST 24 HOURS (do not pick these events again):\n" + "\n".join(f"- {t}" for t in titles[:30]) + "\n"
+    return ("\nALREADY MADE IN THE LAST 24 HOURS (do not pick these events again, nor other stories about the same game "
+            "unless it is a completely new major announcement):\n" + "\n".join(f"- {t}" for t in titles[:30]) + "\n")
 
 
-def build_prompt(cfg: Config, stories: list[Story], n: int, now: datetime | None = None) -> str:
+def build_prompt(cfg: Config, stories: list[Story], n: int, now: datetime | None = None, trend: bool = False) -> str:
     now = now or datetime.now(timezone.utc)
     voice = (PROJECT_ROOT / "voice.md").read_text(encoding="utf-8")
-    rows = "\n".join(f"{s.id} | {s.outlet} | {age_text(s.published, now)} ago | {s.title} | {s.summary or '(no summary)'}"
-                     for s in stories)
+    if trend:
+        rows = "\n".join(f"{s.id} | {s.outlet} | {(s.trend or {}).get('signal', '')} | {s.title} | {s.summary or '(no text)'}"
+                         for s in stories)
+    else:
+        rows = "\n".join(f"{s.id} | {s.outlet} | {age_text(s.published, now)} ago | {s.title} | {s.summary or '(no summary)'}"
+                         for s in stories)
     lo, hi = int(cfg.news["script_min_words"]), int(cfg.news["script_max_words"])
     covered = covered_block(cfg, now)
-    text = PROMPT
+    text = TREND_PROMPT if trend else PROMPT
     for key in ("voice", "rows", "covered"):                    # their text is inserted last, never re-expanded
         text = text.replace("{" + key + "}", "\0" + key + "\0")
     for key, val in {"hours": cfg.news["hours"], "n": n, "bmin": lo - 4, "bmax": hi - 12}.items():
@@ -233,6 +269,17 @@ def _list(d: dict, key: str, lo: int, hi: int) -> list[str]:
     if not lo <= len(v) <= hi:
         raise NewsError(f"'{key}' needs {lo}-{hi} items, got {len(v)}")
     return [mask(x.strip()) for x in v]
+
+
+def repeated_run(headline: str, body: str, n: int = 5) -> str:
+    """The first run of `n` words in a row that the script copies from the source headline ('' = none)."""
+    h, b = words_of(headline), words_of(body)
+    h, b = [w.lower() for w in h], [w.lower() for w in b]
+    grams = {tuple(h[i:i + n]) for i in range(len(h) - n + 1)}
+    for i in range(len(b) - n + 1):
+        if tuple(b[i:i + n]) in grams:
+            return " ".join(b[i:i + n])
+    return ""
 
 
 def final_script(hook: str, body: str) -> str:
@@ -274,11 +321,17 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                 raise NewsError("'score' must be a number 0-10")
             if not isinstance(d.get("sensitive"), bool):
                 raise NewsError("'sensitive' must be true or false")
+            if by_id[sid].trend and d.get("verified") is not True:
+                log.info("news: trend skipped (Claude could not verify the fact): %s", by_id[sid].title[:80])
+                used.discard(sid)
+                continue
             subjects = _list(d, "subjects", 1, 4)
             hooks_raw = _list(d, "hooks", 5, 5)
             body = _text(d, "script_body", 200, 900)
             if bad := banned_in(body):
                 raise NewsError("script_body uses banned filler: " + ", ".join(bad))
+            if echo := repeated_run(by_id[sid].title, body):
+                raise NewsError(f"script_body repeats the source headline ('{echo}'); say it in your own words")
             ranked = rank_hooks(hooks_raw, subjects)
             body_words = len(body.split())
             chosen = next((h for h in ranked if h.valid and lo <= h.words + body_words <= hi), None)
@@ -294,7 +347,8 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                 tags=_list(d, "tags", 8, 15),
                 hashtags=["#" + h.lstrip("#").replace(" ", "") for h in _list(d, "hashtags", 0, 30)],
                 sensitive=d["sensitive"], sensitive_reason=mask(str(d.get("sensitive_reason") or "")),
-                reason=mask(str(d.get("reason") or "")))
+                reason=mask(str(d.get("reason") or "")), major_new=d.get("major_new") is True,
+                core_fact=mask(str(d.get("core_fact") or "")))
             if len(pick.description) > 90:
                 raise NewsError("'description' is longer than 90 characters")
             if pick.sensitive and not pick.sensitive_reason:
@@ -305,20 +359,40 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
     return picks
 
 
-def pick_stories(cfg: Config, stories: list[Story], n: int, work_dir: Path) -> list[Pick]:
-    """One headless Claude call (with retries on a bad reply). Raises NewsError."""
+def pick_stories(cfg: Config, stories: list[Story], n: int, work_dir: Path, trend: bool = False,
+                 blocked: set[str] | None = None) -> list[Pick]:
+    """One headless Claude call (with retries on a bad reply), then the strict topic-diversity rule:
+    one story per game / franchise per run, none on a game covered in the last 24 h (unless a major new announcement).
+    `blocked` = topics already taken earlier in this run. Raises NewsError."""
+    from . import topics
     from .editor import EditorError, call_claude
     work_dir.mkdir(parents=True, exist_ok=True)
-    base = build_prompt(cfg, stories, n)
+    now = datetime.now(timezone.utc)
+    covered = topics.covered_topics(cfg, (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"))
+    covered += [",".join(topics.topic_words(t)) for t in _recent_titles(cfg, now)]
+    base = build_prompt(cfg, stories, n, now, trend)
     prompt, last = base, "unknown"
     for attempt in range(1, int(cfg.ai["retries"]) + 2):
         try:
-            return validate_reply(call_claude(cfg, prompt, work_dir), stories, cfg)
+            picks = validate_reply(call_claude(cfg, prompt, work_dir), stories, cfg)
+            kept, dropped = topics.enforce(picks, [c for c in covered if c], blocked)
+            for why in dropped:
+                log.info("news: dropped (topic diversity): %s", why)
+            if not kept:
+                raise NewsError("every pick repeated a topic: " + "; ".join(dropped))
+            return kept
         except (NewsError, EditorError) as exc:
             last = str(exc)
             log.warning("news: Claude attempt %d failed: %s", attempt, last)
             prompt = base + RETRY_NOTE.format(why=last)
     raise NewsError(last)
+
+
+def _recent_titles(cfg: Config, now: datetime) -> list[str]:
+    try:
+        return db.recent_news_titles(cfg.database, (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        return []
 
 
 # ------------------------------------------------------------------ voiceover + timestamps
@@ -450,33 +524,44 @@ def credit_for_story(story: Story) -> str:
     return f"Sources & Credits: {story.outlet}, {story.link}"
 
 
-def collect_visuals(cfg: Config, story: Story, folder: Path) -> list[dict]:
-    """3-5 pictures for the story's cuts: the article's own, topped up to at least images_min with meme cards.
+def collect_visuals(cfg: Config, story: Story, folder: Path, topic: str | None = None) -> list[dict]:
+    """4-6 REAL pictures for the story's cuts: the article's own, topped up with topic-matched game screenshots.
 
-    -> [{'file', 'url', 'source', 'kind': 'article' | 'meme'}]. Never raises; [] means the gradient background."""
-    if not cfg.news["images"]:
-        return []
+    Article pictures come first (og:image, feed, body). When fewer than images_min unique high-res ones were found,
+    `topic` (the game / platform name) is searched ("<topic> screenshot", "<topic> gameplay") and the validated hits are
+    mixed in. There are no generated cards: when even that gives fewer than images_floor pictures a NewsError is
+    raised and the story is skipped.
+
+    -> [{'file', 'url', 'source', 'kind': 'article' | 'topic'}]."""
+    from . import imagesearch
     try:
-        found = fetch_news_images(story, folder, float(cfg.news["image_timeout"]), int(cfg.news["images_max"]))
+        if story.trend and story.trend.get("source") == "youtube":
+            found = []                       # never reuse a third-party video's thumbnail: topic screenshots only
+        else:
+            found = fetch_news_images(story, folder, float(cfg.news["image_timeout"]), int(cfg.news["images_max"]))
     except Exception:
         log.exception("news: picture hunt failed (ignored)")
         found = []
     visuals = [{**f, "kind": "article"} for f in found]
-    need = int(cfg.news["images_min"]) - len(visuals)
-    if need > 0:
-        from .memes import pick_memes
-        memes = [{"file": m, "url": None, "source": "assets/memes", "kind": "meme"}
-                 for m in pick_memes(cfg, need, story.link)]
-        # interleave: article, meme, article, meme ... so the cuts alternate instead of ending on memes
-        mixed, a, m = [], list(visuals), list(memes)
-        while a or m:
+    want, floor = int(cfg.news["images_min"]), int(cfg.news["images_floor"])
+    if len(visuals) < want:
+        topic = (topic or story.title or "").strip()
+        extra = imagesearch.fetch_topic_images(
+            topic, folder, cfg.data_dir / "image_cache", int(cfg.news["images_max"]) - len(visuals),
+            imagesearch.hashes_of([v["file"] for v in visuals]), len(visuals) + 1, float(cfg.news["image_timeout"]))
+        topical = [{**f, "kind": "topic"} for f in extra]
+        mixed, a, t = [], list(visuals), topical      # article, topic, article, topic ... so the cuts alternate
+        while a or t:
             if a:
                 mixed.append(a.pop(0))
-            if m:
-                mixed.append(m.pop(0))
+            if t:
+                mixed.append(t.pop(0))
         visuals = mixed
     log.info("[%s] news visuals: %s", folder.name,
-             ", ".join(f"{v['kind']}:{v['source']}" for v in visuals) or "none (gradient)")
+             ", ".join(f"{v['kind']}:{v['source']}" for v in visuals) or "none")
+    if len(visuals) < floor:
+        raise NewsError(f"only {len(visuals)} real picture(s) found for '{topic or story.title}' (need {floor}); "
+                        "skipping rather than showing placeholders")
     return visuals
 
 
@@ -500,7 +585,7 @@ def make_short(cfg: Config, pick: Pick) -> Path:
                 source_url=story.link)
     try:
         (folder / "script.txt").write_text(pick.script + "\n", encoding="utf-8")
-        visuals = collect_visuals(cfg, story, folder)                 # [] = gradient background
+        visuals = collect_visuals(cfg, story, folder, pick.subjects[0] if pick.subjects else None)
         track = choose_music(cfg, folder.name)                        # None = no music
         mp3 = folder / "voiceover.mp3"
         voice = synthesize(cfg, pick.script, mp3)
@@ -524,11 +609,16 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         render = render_news_video(cfg, folder, info, words, dur)
 
         credit = credit_for_story(story)
-        used_picture = render.get("background") == "picture"
         used_music = render.get("music")                              # what the renderer REALLY used (it may have dropped it)
-        credit_lines = [pick.description, f"Read the original story: {story.link}"]
-        if used_picture and any(v["kind"] == "article" for v in visuals):
+        trend = bool(story.trend)
+        origin = (f"Inspired by a trending topic (rewritten from scratch, no third-party footage used): {story.link}"
+                  if trend else f"Read the original story: {story.link}")
+        credit_lines = [pick.description, origin]
+        if any(v["kind"] == "article" for v in visuals):
             credit_lines.append(f"Images: {story.outlet} (article pictures)")
+        if any(v["kind"] == "topic" for v in visuals):
+            credit_lines.append("Game screenshots: web image search and Wikimedia Commons; artwork belongs to its "
+                                "developers and publishers")
         if used_music and used_music.get("attribution"):
             credit_lines.append(used_music["attribution"])          # the music license's required credit, automatically
         analysis = {
@@ -538,13 +628,15 @@ def make_short(cfg: Config, pick: Pick) -> Path:
             "title": pick.title, "hook": pick.hook.hook.upper(), "meme_caption": [], "tags": pick.tags,
             "hashtags": pick.hashtags, "description": pick.description,
             "description_full": "\n".join([*credit_lines, credit]),
-            "attribution": f"Read the original story: {story.link}", "credit_line": credit,
+            "attribution": origin, "credit_line": credit,
+            "trend": ({"source": story.trend.get("source"), "signal": story.trend.get("signal"), "core_fact": pick.core_fact,
+                       "origin_url": story.link} if trend else None),
             "news": {"url": story.link, "outlet": story.outlet, "headline": story.title, "kind": pick.kind,
                      "published": story.published.isoformat(timespec="minutes"), "script": pick.script,
                      "hooks": [{"hook": h.hook, "score": h.total, "valid": h.valid, "parts": h.parts,
                                 "reasons": h.reasons} for h in pick.hooks],
                      "voice": voice, "word_timestamps": how,
-                     "images": [{"url": v["url"], "source": v["source"], "kind": v["kind"], "used": used_picture}
+                     "images": [{"url": v["url"], "source": v["source"], "kind": v["kind"]}
                                 for v in visuals]},
             "music": ({"title": used_music["title"], "file": used_music["file"], "attribution": used_music.get("attribution"),
                        "artist": (track or {}).get("artist"), "license": (track or {}).get("license")}
@@ -554,6 +646,11 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         db.record_analysis(cfg.database, folder.name, analysis, folder / "analysis.json")
         db.record_files(cfg.database, folder.name, folder)
         db.set_clip_status(cfg.database, folder.name, "rendered")
+        try:
+            from . import topics
+            topics.remember(cfg, pick)                                   # so this game is not repeated for 24 h
+        except Exception:
+            log.exception("[%s] could not remember the topic (ignored)", folder.name)
         log.info("[%s] NEWS Short ready: %s | hook score %.1f | %.1fs | timestamps: %s | source: %s",
                  folder.name, pick.title, pick.hook.total, dur, how, story.link)
         from .notify import notify_rendered
@@ -581,7 +678,31 @@ def news_left_today(cfg: Config, now: datetime | None = None) -> int:
 
 
 def run_news(cfg: Config, hours: float | None = None, count: int | None = None, dry_run: bool = False,
-             quota: bool = False) -> NewsResult:
+             quota: bool = False, trends: bool = True) -> NewsResult:
+    """The RSS news Shorts (see _run_stories), then - when [trends] is enabled - the trend-discovery Shorts, which are
+    paraphrased from scratch and may not repeat a game already picked in this run. Never raises."""
+    result = _run_stories(cfg, hours, count, dry_run, quota)
+    try:
+        from . import topics
+        from .trends import run_trends, settings as trend_settings
+        if trends and trend_settings(cfg)["enabled"] and not result.note.startswith("run failed"):
+            per = int(trend_settings(cfg)["per_run"])
+            if quota:
+                per = min(per, news_left_today(cfg))
+            if per > 0:
+                taken = {k for p in result.picked for k in topics.pick_topics(p.subjects)}
+                extra = run_trends(cfg, per, dry_run, blocked=taken)
+                result.picked += extra.picked
+                result.made += extra.made
+                result.failed += extra.failed
+                result.note = result.note or extra.note
+    except Exception:
+        log.exception("trend discovery failed (ignored)")
+    return result
+
+
+def _run_stories(cfg: Config, hours: float | None = None, count: int | None = None, dry_run: bool = False,
+                 quota: bool = False) -> NewsResult:
     """Fetch -> pick -> script -> voice -> render for the top stories. Never raises.
 
     quota=True (the scheduled runs) also stops at today's [volume] news_per_day; a run you start by hand does not."""
@@ -605,6 +726,10 @@ def run_news(cfg: Config, hours: float | None = None, count: int | None = None, 
             result.note = f"no fresh stories in the last {hours or cfg.news['hours']:g}h (or all already used)"
             log.info("news: %s", result.note)
             return result
+        from .topics import cap_hot_topics
+        stories = cap_hot_topics(stories)                              # a topic flooding the feeds (GTA 6) shows at most 2 stories
+        for i, s in enumerate(stories, start=1):
+            s.id = i
         log.info("news: %d candidate stories", len(stories))
         picks = pick_stories(cfg, stories, int(cfg.news["stories"]), cfg.data_dir / "news_work")
         result.picked = picks

@@ -360,7 +360,7 @@ class ReviewTests(unittest.TestCase):
                + item.format(t="Totally fresh story today", l="https://ign.com/articles/fresh")
                + "</channel></rss>")
         cfg = self.cfg
-        cfg.raw = {**cfg.raw, "feeds": [{"name": "IGN", "url": "u1"}]}
+        cfg.raw = {**cfg.raw, "news": {**cfg.raw.get("news", {}), "feeds": [{"name": "IGN", "url": "u1"}]}}
         with mock.patch("feedparser.parse", return_value=feedparser.parse(xml)):
             stories = news.fetch_stories(cfg, 12, now)
         self.assertEqual([s.title for s in stories], ["Totally fresh story today"])

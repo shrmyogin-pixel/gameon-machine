@@ -49,6 +49,10 @@ def main(argv: list[str] | None = None) -> int:
     nw.add_argument("--hours", type=float, help="only stories newer than this (default [news] hours = 12)")
     nw.add_argument("--count", type=int, help="how many stories to make (default [news] stories = 2)")
     nw.add_argument("--dry-run", action="store_true", help="pick stories and write scripts only: no voice, video or database rows")
+    nw.add_argument("--no-trends", action="store_true", help="skip the trend-discovery Short(s) at the end of the run")
+    tr = sub.add_parser("trends", help="Trend discovery: original Shorts from trending gaming topics (YouTube metadata, giveaways)")
+    tr.add_argument("--count", type=int, help="how many trend Shorts to make (default [trends] per_run)")
+    tr.add_argument("--dry-run", action="store_true", help="pick topics and write scripts only: no voice, video or database rows")
     cl = sub.add_parser("clean", help="delete skipped/rejected clips older than 2 days and posted clips older than 7 days")
     cl.add_argument("--dry-run", action="store_true", help="list what would be deleted, delete nothing")
     sub.add_parser("route", help="show / refresh the platform + peak-slot routing of the pending clips")
@@ -172,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
                       + (f"  Folder: {mp4.parent}" if res.exported else ""))
                 print("Nothing was uploaded: post these by hand, then press 'Mark Uploaded' in the review dashboard.")
             return 0 if res.ok else 1
-        if args.command == "news":
+        if args.command in ("news", "trends"):
             import logging
 
             from .news import run_news
@@ -185,7 +189,11 @@ def main(argv: list[str] | None = None) -> int:
             console.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%H:%M:%S"))
             log.addHandler(console)
             print("Reading feeds, asking Claude to pick the stories (this takes a minute)...")
-            res = run_news(cfg, args.hours, args.count, args.dry_run)
+            if args.command == "trends":
+                from .trends import run_trends
+                res = run_trends(cfg, args.count, args.dry_run)
+            else:
+                res = run_news(cfg, args.hours, args.count, args.dry_run, trends=not args.no_trends)
             if res.note:
                 print(res.note)
             for p in res.picked:

@@ -1,12 +1,13 @@
 """Real article pictures for news Shorts: 3-5 distinct, high-resolution visuals per story.
 
 Where they come from, best first: the article page's og:image / twitter:image, the pictures the RSS entry carries
-(media:content / media:thumbnail / enclosure / inline <img>), then the article's own body images (inside <article> /
-<main> first). Icons, logos, avatars, ads, tracking pixels, SVG/GIF and anything smaller than MIN_WIDTH x MIN_HEIGHT
-are dropped, and so are near-duplicates (the same photo at another size, found by a perceptual hash).
+(media:content / media:thumbnail / enclosure / inline <img>), then the article's own body images: <picture>/<source>,
+srcset, data-src and plain <img> tags (inside <article> / <main> first). Parsed with BeautifulSoup. Icons, logos,
+avatars, ads, tracking pixels, SVG/GIF and anything smaller than MIN_WIDTH x MIN_HEIGHT or banner-shaped are dropped,
+and so are near-duplicates (the same photo at another size, found by a perceptual hash).
 
-Everything is optional: any failure just returns fewer pictures. The caller tops up with the meme cards in
-assets/memes (memes.py) when fewer than 3 are found, and with none at all the Short uses the gradient background.
+Everything is optional: any failure just returns fewer pictures. The caller (news.collect_visuals) tops up with
+topic-matched game screenshots from imagesearch.py when fewer than 4 are found. There are no placeholder cards.
 
 Safety: only http(s); the host (and every redirect hop) must resolve to a public address (no localhost, LAN or
 link-local); page and image downloads are size- and time-limited; the bytes must decode as a real picture of a
@@ -24,16 +25,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from html.parser import HTMLParser
 from pathlib import Path
 
 log = logging.getLogger("clipper")
 
-USER_AGENT = "Mozilla/5.0 (compatible; gameon-clipper/1.0)"
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/124.0 Safari/537.36")      # a plain bot UA gets 403 from many image CDNs
 MAX_PAGE_BYTES = 1_500_000
 MAX_IMAGE_BYTES = 12_000_000
-MIN_WIDTH, MIN_HEIGHT = 640, 360          # "high-res": smaller pictures look soft on a 1080x1920 Short
-MAX_ASPECT = 2.6                          # width / height: wider than this is a banner, not a photo
+MIN_WIDTH, MIN_HEIGHT = 600, 300          # "high-res": smaller pictures look soft on a 1080x1920 Short
+MAX_ASPECT = 2.4                          # width / height: wider than this is a banner, not a photo
 MIN_ASPECT = 0.4
 MAX_SIDE = 2400                           # larger pictures are shrunk before saving (the Short is 1080x1920)
 MAX_ATTEMPTS = 14                         # downloads tried per story
@@ -44,7 +45,6 @@ META_KEYS = ("og:image:secure_url", "og:image", "twitter:image", "twitter:image:
 JUNK = re.compile(r"(logo|favicon|sprite|avatar|icon|placeholder|blank|pixel|1x1|gravatar|emoji|badge|spacer|"
                   r"(^|[-_/.])(ads?|advert\w*|banner|sponsor\w*|promo|tracking|share|button|author|profile)([-_/.]|$))", re.I)
 SKIP_PARENTS = {"nav", "header", "footer", "aside", "form", "button", "svg", "script", "style", "noscript"}
-VOID = {"img", "meta", "br", "hr", "link", "input", "source", "area", "base", "col", "embed", "param", "track", "wbr"}
 SIZE_SUFFIX = re.compile(r"-\d{2,4}x\d{2,4}(?=\.\w+$)")
 
 
@@ -107,7 +107,7 @@ def image_from_entry(entry) -> str | None:
 
 def _best_from_srcset(srcset: str) -> str | None:
     best, best_w = None, -1
-    for part in (srcset or "").split(","):
+    for part in re.split(r",\s+", (srcset or "").strip()):
         bits = part.strip().split()
         if not bits:
             continue
@@ -117,35 +117,41 @@ def _best_from_srcset(srcset: str) -> str | None:
     return best
 
 
-class _PageParser(HTMLParser):
-    """og/twitter meta tags and the article's <img> tags (with whether each sits inside <article> / <main>)."""
+def _soup(page: str):
+    from bs4 import BeautifulSoup
+    try:
+        return BeautifulSoup(page, "lxml")
+    except Exception:                                   # lxml missing / confused: the stdlib parser always works
+        return BeautifulSoup(page, "html.parser")
+
+
+class _PageParser:
+    """og/twitter meta tags and every candidate <img> / <picture><source> of a page (BeautifulSoup), each with whether
+    it sits inside <article> / <main>. Pictures inside nav / header / footer / aside / forms are ignored."""
 
     def __init__(self):
-        super().__init__(convert_charrefs=True)
         self.found: dict[str, str] = {}
-        self.imgs: list[tuple[str, bool]] = []
-        self.stack: list[str] = []
+        self.imgs: list[tuple[str, bool, str]] = []
 
-    def handle_starttag(self, tag, attrs):
-        a = {k.lower(): (v or "") for k, v in attrs}
-        if tag == "meta":
-            key = (a.get("property") or a.get("name") or "").lower()
-            if key in META_KEYS and a.get("content", "").strip():
-                self.found.setdefault(key, a["content"].strip())
-        elif tag == "img" and not (SKIP_PARENTS & set(self.stack)):
-            url = (_best_from_srcset(a.get("srcset") or a.get("data-srcset", "")) or a.get("data-src") or a.get("data-lazy-src")
-                   or a.get("data-original") or a.get("src"))
-            w, h = _num(a.get("width")), _num(a.get("height"))
-            if url and not (0 < w < 300) and not (0 < h < 150):
-                blob = " ".join([a.get("class", ""), a.get("alt", ""), a.get("id", "")])
-                self.imgs.append((url, bool({"article", "main"} & set(self.stack)), blob))
-        if tag not in VOID:
-            self.stack.append(tag)
-
-    def handle_endtag(self, tag):
-        if tag in self.stack:
-            while self.stack and self.stack.pop() != tag:
-                pass
+    def feed(self, page: str) -> None:
+        soup = _soup(page)
+        for tag in soup.find_all("meta"):
+            key = (tag.get("property") or tag.get("name") or "").lower()
+            content = (tag.get("content") or "").strip()
+            if key in META_KEYS and content:
+                self.found.setdefault(key, content)
+        for tag in soup.find_all(["img", "source"]):
+            if tag.name == "source" and (tag.parent is None or tag.parent.name != "picture"):
+                continue
+            if any(p.name in SKIP_PARENTS for p in tag.parents if p.name):
+                continue
+            url = (_best_from_srcset(tag.get("srcset") or tag.get("data-srcset") or "") or tag.get("data-src")
+                   or tag.get("data-lazy-src") or tag.get("data-original") or tag.get("src"))
+            w, h = _num(tag.get("width")), _num(tag.get("height"))
+            if url and not (0 < w < 300) and not (0 < h < 150) and not url.startswith("data:"):
+                blob = " ".join([" ".join(tag.get("class") or []), tag.get("alt") or "", tag.get("id") or ""])
+                in_article = any(p.name in ("article", "main") for p in tag.parents if p.name)
+                self.imgs.append((url, in_article, blob))
 
 
 def article_images(page: str, base_url: str) -> list[str]:
@@ -229,13 +235,16 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def download(url: str, limit: int, timeout: float, truncate: bool = False) -> tuple[bytes, str]:
+def download(url: str, limit: int, timeout: float, truncate: bool = False, referer: str | None = None) -> tuple[bytes, str]:
     """-> (bytes, content type). Raises on anything unsafe or slow, and on too big unless `truncate` (pages: the
     tags we need are early, so the first `limit` bytes are enough)."""
     if not public_host(url):
         raise ValueError("not a public http(s) address")
     opener = urllib.request.build_opener(_SafeRedirect)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*,text/html;q=0.8,*/*;q=0.5"})
+    headers = {"User-Agent": USER_AGENT, "Accept": "image/*,text/html;q=0.8,*/*;q=0.5"}
+    if referer:
+        headers["Referer"] = referer                    # many CDNs block hotlinking unless the article page is the referer
+    req = urllib.request.Request(url, headers=headers)
     with opener.open(req, timeout=timeout) as resp:
         ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         data = resp.read(limit + 1)
@@ -244,6 +253,27 @@ def download(url: str, limit: int, timeout: float, truncate: bool = False) -> tu
             raise ValueError("download too large")
         data = data[:limit]
     return data, ctype
+
+
+def download_retry(url: str, limit: int, timeout: float, truncate: bool = False, referer: str | None = None,
+                   tries: int = 3) -> tuple[bytes, str]:
+    """download() with clean retries: every request carries the article as Referer (hotlink protection), a 401 / 403
+    is retried with the image host as Referer, timeouts and 5xx errors are retried after a short pause, 404 / unsafe hosts are not."""
+    last: Exception | None = None
+    for attempt in range(tries):
+        try:
+            return download(url, limit, timeout, truncate, referer=referer)
+        except urllib.error.HTTPError as exc:
+            last = exc
+            if exc.code in (400, 404, 410):
+                break
+            referer = referer or f"{urllib.parse.urlsplit(url).scheme}://{urllib.parse.urlsplit(url).netloc}/"
+        except ValueError:
+            raise                                       # not a public address / too big: retrying cannot help
+        except Exception as exc:                        # timeouts, resets, DNS blips
+            last = exc
+        time.sleep(0.8 * (attempt + 1))
+    raise last or RuntimeError("download failed")
 
 
 # ------------------------------------------------------------------ validating + saving
@@ -307,7 +337,7 @@ def fetch_news_images(story, folder: Path, timeout: float = 15.0, want: int = 5)
             tried.add(u)
             attempts += 1
             try:
-                data, ctype = download(u, MAX_IMAGE_BYTES, timeout)
+                data, ctype = download_retry(u, MAX_IMAGE_BYTES, timeout, referer=story.link, tries=2)
                 if ctype.startswith("text/"):
                     continue
                 info = save_picture(data, folder / IMAGE_NAME.format(n=len(kept) + 1), hashes)
@@ -325,7 +355,7 @@ def fetch_news_images(story, folder: Path, timeout: float = 15.0, want: int = 5)
         og: list[str] = []
         body: list[str] = []
         try:
-            page, _ctype = download(story.link, MAX_PAGE_BYTES, timeout, truncate=True)
+            page, _ctype = download_retry(story.link, MAX_PAGE_BYTES, timeout, truncate=True, tries=2)
             text = page.decode("utf-8", errors="replace")
             og = og_images(text, story.link)
             body = [u for u in article_images(text, story.link) if u not in og]

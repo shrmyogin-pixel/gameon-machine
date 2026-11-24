@@ -21,7 +21,8 @@ EARLY_WORDS = 6
 BANNED = ("what is up guys", "what's up guys", "hey guys", "welcome back", "you won't believe",
           "you wont believe", "let's get into it", "lets get into it", "before we start", "smash that like button",
           "without further ado", "make sure to subscribe", "in today's video", "in todays video", "as you can see",
-          "basically", "literally")
+          "basically", "literally", "stay tuned", "check this out", "get ready", "are you ready", "buckle up",
+          "gamers rejoice")
 
 PLATFORMS = ("playstation", "ps5", "ps4", "ps plus", "xbox", "game pass", "nintendo", "switch", "switch 2", "steam",
              "epic", "epic games", "gog", "pc", "ubisoft", "ea", "battle.net", "riot", "valve", "sony", "microsoft",
