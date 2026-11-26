@@ -32,6 +32,10 @@ taking take takes real really big huge major massive full""".split())
 ALIASES = {"grand theft auto": "gta", "call of duty": "cod", "red dead redemption": "red dead", "the legend of zelda": "zelda",
            "legend of zelda": "zelda", "counter-strike": "counter strike", "cs2": "counter strike", "cs go": "counter strike",
            "csgo": "counter strike", "pokémon": "pokemon", "pokèmon": "pokemon"}
+# what can bring a game back within 24 hours: an announcement, never a report, claim, rumour or leak about it
+ANNOUNCEMENT = re.compile(r"\b(release date|delay(?:s|ed)?|announc(?:es?|ed|ing|ement)|reveal(?:s|ed)?|trailer|"
+                          r"cancel(?:s|l?ed|lation)?|shut(?:s|ting)? ?down|shutdown)\b", re.I)
+HEARSAY = re.compile(r"\b(report(?:s|ed|edly)?|claim(?:s|ed)?|rumou?r(?:s|ed)?|leak(?:s|ed)?|allegedly)\b", re.I)
 ROMAN = re.compile(r"^(?:i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii|xiv|xv|xx)$")
 
 
@@ -98,9 +102,13 @@ def covered_topics(cfg, since_utc: str) -> list[str]:
         return []
 
 
+def is_new_announcement(headline: str) -> bool:
+    return bool(ANNOUNCEMENT.search(headline or "")) and not HEARSAY.search(headline or "")
+
+
 def enforce(picks: list, covered: list[str], blocked: set[str] | None = None) -> tuple[list, list[str]]:
     """Keep picks best-first: drop any whose topic repeats an earlier pick in this run (or `blocked`), or a topic covered
-    in the last 24 h unless pick.major_new is true. -> (kept, [why each one was dropped])."""
+    in the last 24 h unless pick.major_new is true AND the headline is a first-hand announcement. -> (kept, [why each one was dropped])."""
     seen_topics: list[set[str]] = [{k} for k in (blocked or set())]
     old = [set(c.split(",")) for c in covered]
     kept, dropped = [], []
@@ -109,7 +117,8 @@ def enforce(picks: list, covered: list[str], blocked: set[str] | None = None) ->
         if any(share_topic(topics, t) for t in seen_topics):
             dropped.append(f"'{p.story.title[:50]}' repeats a topic already picked in this run")
             continue
-        if not getattr(p, "major_new", False) and any(share_topic(topics, t) for t in old):
+        major = getattr(p, "major_new", False) and is_new_announcement(p.story.title)
+        if not major and any(share_topic(topics, t) for t in old):
             dropped.append(f"'{p.story.title[:50]}' is about a topic covered in the last 24 hours")
             continue
         seen_topics.append(topics)

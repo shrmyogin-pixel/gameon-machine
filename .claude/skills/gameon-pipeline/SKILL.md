@@ -36,6 +36,10 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - Six buckets (`buckets.py`): flagship, freebie, update, glitch, creator, tech. At most 2 per bucket per run.
 - Never gambling or betting, piracy, cheat tools or scams (`news.HARD_SKIP`), and the other hard skips in `CLAUDE.md`.
 - Only facts the source supports; leaks are labelled as leaks.
+- A story that cannot answer its own hook (the platform, name, price or date it teases is not in the source) is
+  dropped before rendering (`answers_hook`).
+- A game covered in the last 24 hours returns only for a first-hand announcement, never a report, claim or leak
+  (`topics.is_new_announcement`).
 
 ## Credit and attribution
 - Every export's description ends with a `Sources & Credits:` line naming the source and its link. No line, no export.

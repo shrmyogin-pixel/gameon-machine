@@ -57,6 +57,41 @@ class UnsafeStoryTests(unittest.TestCase):
         self.assertFalse(news.copies_headline("Call of Duty Black Ops gets a patch", "Your Call of Duty Black Ops loadout changed",
                                               ["Call of Duty Black Ops"]))
 
+class StorySelectionTests(unittest.TestCase):
+    def test_a_story_that_cannot_answer_its_hook_is_dropped(self):
+        import json
+        from tests.test_news import reply, story
+        data = {"stories": [{**reply(1), "answers_hook": False}, {**reply(2), "answers_hook": True}]}
+        picks = news.validate_reply(json.dumps(data), [story(1), story(2)], load_config())
+        self.assertEqual([p.story.id for p in picks], [2])
+        with self.assertRaisesRegex(news.NewsError, "cannot answer its own hook"):
+            news.validate_reply(json.dumps({"stories": data["stories"][:1]}), [story(1)], load_config())
+
+    def test_an_empty_story_list_means_nothing_today_not_a_failed_run(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from clipper import editor
+        from tests.test_news import story
+        cfg = load_config()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            cfg.database = Path(tmp) / "c.sqlite"
+            with mock.patch.object(editor, "call_claude", return_value='{"stories": []}') as call:
+                self.assertEqual(news.pick_stories(cfg, [story(1)], 1, Path(tmp)), [])
+        call.assert_called_once()
+
+    def test_a_report_cannot_bring_a_covered_game_back(self):
+        from types import SimpleNamespace as NS
+        from clipper import topics
+
+        def kept(title):
+            pick = NS(score=8, subjects=["Ubisoft"], major_new=True, story=NS(title=title))
+            return bool(topics.enforce([pick], ["assassin creed,ubisoft"])[0])
+        self.assertFalse(kept("Report: Ubisoft CEO is demanding developers justify not using AI"))
+        self.assertFalse(kept("Ubisoft rumoured to announce a delay"))
+        self.assertFalse(kept("Ubisoft devs talk about crunch"))
+        self.assertTrue(kept("Ubisoft announces a new release date for its next game"))
+
 
 if __name__ == "__main__":
     unittest.main()

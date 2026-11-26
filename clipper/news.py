@@ -196,6 +196,7 @@ FOR EACH STORY write:
 - tags: 8-15 search tags. hashtags: 3-6 hashtags that start with #.
 - kind: "news" or "free_offer".  bucket: "flagship", "freebie", "update", "glitch", "creator" or "tech".  score: 0-10, how strong this story is for the channel today.
 - sensitive: true only when a human should look carefully (add sensitive_reason), else false.
+- answers_hook: true only when the row itself gives every fact the headline and your hooks turn on (WHICH platform, game or person, HOW MUCH, WHEN). If the headline teases a detail the row never states ("skipping one platform", "a surprise guest"), do not pick that story; if you are unsure, set false.
 - reason: one sentence on why you chose it.
 
 HOOK AND CLOSING RULES (strict, they decide whether people stay):
@@ -204,7 +205,7 @@ HOOK AND CLOSING RULES (strict, they decide whether people stay):
 - CLOSING (the last 2-3 seconds, the last sentence of script_body, at most 12 words): NEVER "thanks for watching", "follow for more", "see you next time", "watch this space" or any slow generic outro. End on a punchy final twist, a debate question the viewer wants to answer, or a loop line that flows naturally back into the opening hook. It must make sense if the video starts over.
 
 Reply with STRICT JSON only (no prose, no code fences):
-{"stories": [{"id": 3, "kind": "news", "bucket": "creator", "score": 8, "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "reason": "..."}]}"""
+{"stories": [{"id": 3, "kind": "news", "bucket": "creator", "score": 8, "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "answers_hook": true, "reason": "..."}]}"""
 
 TREND_PROMPT = """You are the news editor and scriptwriter of Game On, a gaming news YouTube Shorts channel.
 
@@ -229,6 +230,7 @@ FOR EACH TOPIC write:
 - tags: 8-15 search tags. hashtags: 3-6 hashtags that start with #.
 - kind: "trend" or "free_offer".  bucket: "flagship", "freebie", "update", "glitch", "creator" or "tech".  score: 0-10.  verified: true/false.  core_fact: the fact.  major_new: true/false.
 - sensitive: true only when a human should look carefully (add sensitive_reason), else false.
+- answers_hook: true only when the row itself gives every fact the headline and your hooks turn on (WHICH platform, game or person, HOW MUCH, WHEN). If the headline teases a detail the row never states ("skipping one platform", "a surprise guest"), do not pick that story; if you are unsure, set false.
 - reason: one sentence on why you chose it.
 
 HOOK AND CLOSING RULES (strict, they decide whether people stay):
@@ -237,7 +239,7 @@ HOOK AND CLOSING RULES (strict, they decide whether people stay):
 - CLOSING (the last 2-3 seconds, the last sentence of script_body, at most 12 words): NEVER "thanks for watching", "follow for more", "see you next time", "watch this space" or any slow generic outro. End on a punchy final twist, a debate question the viewer wants to answer, or a loop line that flows naturally back into the opening hook. It must make sense if the video starts over.
 
 Reply with STRICT JSON only (no prose, no code fences):
-{"stories": [{"id": 3, "kind": "trend", "bucket": "update", "score": 8, "verified": true, "core_fact": "...", "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "reason": "..."}]}"""
+{"stories": [{"id": 3, "kind": "trend", "bucket": "update", "score": 8, "verified": true, "core_fact": "...", "subjects": ["..."], "hooks": ["", "", "", "", ""], "script_body": "...", "headline": "...", "title": "...", "description": "...", "tags": ["..."], "hashtags": ["#..."], "sensitive": false, "sensitive_reason": "", "major_new": false, "answers_hook": true, "reason": "..."}]}"""
 
 RETRY_NOTE = ("\n\nYour previous reply was rejected: {why}. Reply again with ONLY the JSON object "
               "- no prose, no markdown, no code fences.")
@@ -360,6 +362,9 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                 log.info("news: trend skipped (Claude could not verify the fact): %s", by_id[sid].title[:80])
                 used.discard(sid)
                 continue
+            if d.get("answers_hook") is False:
+                raise NewsError("the row does not give the fact the story turns on, so the Short cannot answer its own hook; "
+                                "pick a different story")
             subjects = _list(d, "subjects", 1, 4)
             hooks_raw = _list(d, "hooks", 5, 5)
             body = _text(d, "script_body", 200, 900)
@@ -434,7 +439,11 @@ def pick_stories(cfg: Config, stories: list[Story], n: int, work_dir: Path, tren
     prompt, last = base, "unknown"
     for attempt in range(1, int(cfg.ai["retries"]) + 2):
         try:
-            picks = validate_reply(call_claude(cfg, prompt, work_dir), stories, cfg)
+            reply = call_claude(cfg, prompt, work_dir)
+            if re.search(r'"stories"\s*:\s*\[\s*\]', reply):
+                log.info("news: Claude found no story worth making")
+                return []                    # a clean "nothing today", not a broken reply
+            picks = validate_reply(reply, stories, cfg)
             kept, dropped = topics.enforce(picks, [c for c in covered if c], blocked)
             for why in dropped:
                 log.info("news: dropped (topic diversity): %s", why)

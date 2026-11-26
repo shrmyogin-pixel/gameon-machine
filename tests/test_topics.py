@@ -43,7 +43,7 @@ class TopicTests(unittest.TestCase):
 
     def test_one_story_per_game_per_run_and_24h_memory(self):
         cfg = load_config()
-        stories = [story(1, "GTA 6 trailer 3"), story(2, "GTA VI map leak"), story(3, "Hades 2 patch"), story(4, "Halo update")]
+        stories = [story(1, "GTA 6 trailer 3"), story(2, "GTA VI map leak"), story(3, "Hades 2 patch"), story(4, "Halo release date announced")]
         text = json.dumps({"stories": [reply(1, ["GTA 6"], score=9), reply(2, ["Grand Theft Auto VI"], score=8),
                                        reply(3, ["Hades 2"], score=7), reply(4, ["Halo"], score=6)]})
         cfg.raw = {**cfg.raw, "news": {**cfg.raw["news"], "stories": 4}}
