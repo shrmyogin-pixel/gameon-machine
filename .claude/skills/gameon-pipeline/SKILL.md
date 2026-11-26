@@ -12,7 +12,7 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - Output is 1080x1920 (`render.W`, `render.H`), 30 fps, for every render and export.
 - Encoder: Intel `h264_qsv` on this PC (first working entry of `[encoding] encoders`; `libx264` only if none work).
 - Every FFmpeg process runs at below-normal priority (`[encoding] below_normal_priority = true`).
-- `[render] max_renders = 1`.
+- `[render] max_renders = 1`, held across processes too (`render._machine_slot`).
 - `[general] autopost = false`. Never add code that uploads or publishes.
 
 ## Look
@@ -23,7 +23,7 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - **Category pill: normal solid yellow fill, dark text.** Opaque box (ASS `BorderStyle 3`), fill `&H0000D4FF&`,
   text `&H00141414&`, no glow, no neon, no shadow. `refs/change 1.JPG` shows the old glowing pill: do not go back to it.
 - Pill words (`buckets.badge_label`): `GTA 6`, `FREE GAME`, `PATCH UPDATE`, `WILD BUG`, `CREATOR NEWS`, `GAMING TECH`.
-  A flagship story that is not about GTA shows `BIG GAME`.
+  A flagship story that is not about GTA shows `BIG GAME`; GTA Online and older GTA games show `GTA`.
 - Game On watermark bottom-left, above the y=1450 safe zone.
 
 ## Pictures and hooks
@@ -40,6 +40,11 @@ These are fixed. Change one only when the user explicitly asks for that change; 
   dropped before rendering (`answers_hook`).
 - A game covered in the last 24 hours returns only for a first-hand announcement, never a report, claim or leak
   (`topics.is_new_announcement`).
+
+## GTA-only mode
+- `gta.bat` or `python -m clipper news --only-gta`: stories with GTA in the headline (`gta.py`), looking back
+  `[news] gta_hours`, no trend Shorts. Same filters, look, queue and review as `news.bat`, which is unchanged.
+- Several GTA Shorts are allowed when each covers a different angle.
 
 ## Credit and attribution
 - Every export's description ends with a `Sources & Credits:` line naming the source and its link. No line, no export.

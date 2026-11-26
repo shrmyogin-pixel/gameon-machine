@@ -20,6 +20,7 @@ LABELS = {"flagship": "GTA 6", "freebie": "FREE GAME", "update": "PATCH UPDATE",
           "creator": "CREATOR NEWS", "tech": "GAMING TECH"}
 OTHER_FLAGSHIP_LABEL = "BIG GAME"          # a flagship story that is not about GTA must not wear a "GTA 6" badge
 GTA = re.compile(r"\b(gta|grand theft auto)\b", re.I)
+OLDER_GTA = re.compile(r"\b(?:gta|grand theft auto)[ :-]*(?:online|5|v|iv|4|iii|3|san andreas|vice city|trilogy)\b", re.I)
 
 # whole-word / phrase patterns, checked in ORDER (a giveaway beats a patch note that merely mentions a free game)
 PATTERNS = {
@@ -50,8 +51,11 @@ def classify(text: str) -> str | None:
 
 def badge_label(bucket: str, kind: str = "news", subject: str = "") -> str:
     """The words on the yellow pill. `subject` is the story's main game (or its headline when no game is named)."""
-    if bucket == "flagship" and not GTA.search(subject or ""):
-        return OTHER_FLAGSHIP_LABEL
+    if bucket == "flagship":
+        if not GTA.search(subject or ""):
+            return OTHER_FLAGSHIP_LABEL
+        if OLDER_GTA.search(subject):
+            return "GTA"
     if bucket in LABELS:
         return LABELS[bucket]
     return LABELS["freebie"] if kind == "free_offer" else "BREAKING NEWS"

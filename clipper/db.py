@@ -431,6 +431,14 @@ def recent_topics(db_path: Path, since_utc: str) -> list[str]:
         return [r["topics"] for r in conn.execute("SELECT topics FROM news_topics WHERE created_at >= ?", (since_utc,))]
 
 
+def recent_topic_headlines(db_path: Path, since_utc: str) -> list[str]:
+    """Source headlines of the news Shorts made since `since_utc` (kept even after the clip is deleted)."""
+    init_db(db_path)
+    with connect(db_path) as conn:
+        return [r["title"] for r in conn.execute(
+            "SELECT title FROM news_topics WHERE title IS NOT NULL AND created_at >= ?", (since_utc,))]
+
+
 def news_urls_seen(db_path: Path) -> set[str]:
     """Article URLs that already became a news Short (so the same story is never made twice).
     A story whose Short failed is not counted, so the next run can try it again."""

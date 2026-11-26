@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import db
+from . import db, gta
 from .config import PROJECT_ROOT, Config, get_env_key
 from .buckets import BUCKETS, classify, enforce_mix
 from .hookscore import HookScore, banned_in, closer_banned, names_subject, opener_of, rank_hooks, restates_hook, words_of
@@ -159,6 +159,8 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
         if any(k in seen_keys for k in story_keys(s.link, s.title)):
             log.info("news: skipped (story already made, rejected or uploaded): %s", s.title[:80])
             continue
+        if cfg.news.get("only") == "gta" and not gta.is_gta_story(s.title, s.summary):
+            continue
         if HARD_SKIP.search(f"{s.title} {s.summary} {s.link}"):
             log.info("news: skipped (gambling, piracy, cheat or scam): %s", s.title[:80])
             continue
@@ -167,7 +169,9 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
         unique.append(s)
     from .buckets import balance
     from .topics import cap_hot_topics                            # before balancing, so a flooding topic wastes no slots
-    unique = balance(cap_hot_topics(unique), int(cfg.news["max_candidates"]))     # a mix of the six buckets
+    if not cfg.news.get("only"):                                  # a GTA-only run is all one topic: nothing to cap
+        unique = cap_hot_topics(unique)
+    unique = balance(unique, int(cfg.news["max_candidates"]))     # a mix of the six buckets
     for i, s in enumerate(unique, start=1):
         s.id = i
     return unique
@@ -278,7 +282,8 @@ def build_prompt(cfg: Config, stories: list[Story], n: int, now: datetime | None
         text = text.replace("{" + key + "}", "\0" + key + "\0")
     for key, val in {"hours": cfg.news["hours"], "n": n, "bmin": lo - 4, "bmax": hi - 12}.items():
         text = text.replace("{" + key + "}", str(val))
-    return text.replace("\0voice\0", voice).replace("\0rows\0", rows).replace("\0covered\0", covered)
+    text = text.replace("\0voice\0", voice).replace("\0rows\0", rows).replace("\0covered\0", covered)
+    return text + gta.PROMPT_NOTE if cfg.news.get("only") == "gta" else text
 
 
 def _text(d: dict, key: str, lo: int, hi: int, what: str | None = None) -> str:
@@ -444,12 +449,16 @@ def pick_stories(cfg: Config, stories: list[Story], n: int, work_dir: Path, tren
                 log.info("news: Claude found no story worth making")
                 return []                    # a clean "nothing today", not a broken reply
             picks = validate_reply(reply, stories, cfg)
-            kept, dropped = topics.enforce(picks, [c for c in covered if c], blocked)
+            only_gta = cfg.news.get("only") == "gta"
+            if only_gta:
+                kept, dropped = gta.enforce_angles(picks, _covered_headlines(cfg, now))
+            else:
+                kept, dropped = topics.enforce(picks, [c for c in covered if c], blocked)
             for why in dropped:
                 log.info("news: dropped (topic diversity): %s", why)
             if not kept:
                 raise NewsError("every pick repeated a topic: " + "; ".join(dropped))
-            kept, over = enforce_mix(kept, int(cfg.news.get("bucket_max", 2)))
+            kept, over = enforce_mix(kept, len(kept) if only_gta else int(cfg.news.get("bucket_max", 2)))
             for why in over:
                 log.info("news: dropped (bucket mix): %s", why)
             return kept
@@ -458,6 +467,15 @@ def pick_stories(cfg: Config, stories: list[Story], n: int, work_dir: Path, tren
             log.warning("news: Claude attempt %d failed: %s", attempt, last)
             prompt = base + RETRY_NOTE.format(why=last)
     raise NewsError(last)
+
+
+def _covered_headlines(cfg: Config, now: datetime) -> list[str]:
+    """Source headlines and titles of the Shorts of the last 24 hours (headlines survive Reject / Mark Uploaded)."""
+    since = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        return db.recent_topic_headlines(cfg.database, since) + db.recent_news_titles(cfg.database, since)
+    except Exception:
+        return []
 
 
 def _recent_titles(cfg: Config, now: datetime) -> list[str]:
@@ -754,9 +772,20 @@ def news_left_today(cfg: Config, now: datetime | None = None) -> int:
 
 
 def run_news(cfg: Config, hours: float | None = None, count: int | None = None, dry_run: bool = False,
-             quota: bool = False, trends: bool = True) -> NewsResult:
+             quota: bool = False, trends: bool = True, only: str | None = None) -> NewsResult:
     """The RSS news Shorts (see _run_stories), then - when [trends] is enabled - the trend-discovery Shorts, which are
-    paraphrased from scratch and may not repeat a game already picked in this run. Never raises."""
+    paraphrased from scratch and may not repeat a game already picked in this run. Never raises.
+
+    only="gta": GTA stories from the RSS feeds only (see gta.py), looking back [news] gta_hours, without trend Shorts."""
+    if only:
+        before = dict(cfg.raw.get("news", {}))
+        cfg.raw["news"] = {**before, "only": only}
+        hours = hours if hours is not None else float(cfg.news.get("gta_hours", 48))
+        trends = False
+        try:
+            return _run_stories(cfg, hours, count, dry_run, quota)
+        finally:
+            cfg.raw["news"] = before
     result = _run_stories(cfg, hours, count, dry_run, quota)
     try:
         from . import topics
@@ -803,12 +832,15 @@ def _run_stories(cfg: Config, hours: float | None = None, count: int | None = No
             log.info("news: %s", result.note)
             return result
         from .topics import cap_hot_topics
-        stories = cap_hot_topics(stories)                              # a topic flooding the feeds (GTA 6) shows at most 2 stories
+        if not cfg.news.get("only"):
+            stories = cap_hot_topics(stories)                          # a topic flooding the feeds (GTA 6) shows at most 2 stories
         for i, s in enumerate(stories, start=1):
             s.id = i
         log.info("news: %d candidate stories", len(stories))
         picks = pick_stories(cfg, stories, int(cfg.news["stories"]), cfg.data_dir / "news_work")
         result.picked = picks
+        if not picks:
+            result.note = "no story worth making this time"
         if dry_run:
             return result
         for pick in picks:

@@ -49,6 +49,8 @@ def main(argv: list[str] | None = None) -> int:
     nw.add_argument("--hours", type=float, help="only stories newer than this (default [news] hours = 12)")
     nw.add_argument("--count", type=int, help="how many stories to make (default [news] stories = 2)")
     nw.add_argument("--dry-run", action="store_true", help="pick stories and write scripts only: no voice, video or database rows")
+    nw.add_argument("--topic", choices=["gta"], help="only stories about this game (looks back [news] gta_hours)")
+    nw.add_argument("--only-gta", dest="topic", action="store_const", const="gta", help="same as --topic gta")
     nw.add_argument("--no-trends", action="store_true", help="skip the trend-discovery Short(s) at the end of the run")
     tr = sub.add_parser("trends", help="Trend discovery: original Shorts from trending gaming topics (YouTube metadata, giveaways)")
     tr.add_argument("--count", type=int, help="how many trend Shorts to make (default [trends] per_run)")
@@ -193,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                 from .trends import run_trends
                 res = run_trends(cfg, args.count, args.dry_run)
             else:
-                res = run_news(cfg, args.hours, args.count, args.dry_run, trends=not args.no_trends)
+                res = run_news(cfg, args.hours, args.count, args.dry_run, trends=not args.no_trends, only=args.topic)
             if res.note:
                 print(res.note)
             for p in res.picked:

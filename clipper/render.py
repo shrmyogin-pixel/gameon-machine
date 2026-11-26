@@ -11,10 +11,12 @@ Nothing here uploads anything (autopost = false). Transcript text is never writt
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
 import threading
+import time
 from pathlib import Path
 
 from .config import Config
@@ -463,10 +465,50 @@ def has_audio(cfg: Config, source: Path) -> bool:
 
 
 # ------------------------------------------------------------------ render
-def _slot(cfg: Config) -> threading.BoundedSemaphore:
+@contextlib.contextmanager
+def _machine_slot(folder: Path, n: int):
+    """One of `n` render slots shared by EVERY clipper process (gta.bat next to news.bat or run.bat): a locked byte in
+    <data>/render-<i>.lock, which Windows releases by itself if a process dies."""
+    try:
+        import msvcrt
+    except ImportError:                                 # not Windows: the in-process limit still applies
+        yield
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    handles = [open(folder / f"render-{i}.lock", "a+b") for i in range(n)]
+    held, told = None, False
+    try:
+        while held is None:
+            for handle in handles:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    held = handle
+                    break
+                except OSError:
+                    continue
+            else:
+                if not told:
+                    log.info("render: waiting for another clipper window to finish its render")
+                    told = True
+                time.sleep(2)
+        yield
+    finally:
+        if held:
+            held.seek(0)
+            msvcrt.locking(held.fileno(), msvcrt.LK_UNLCK, 1)
+        for handle in handles:
+            handle.close()
+
+
+@contextlib.contextmanager
+def _slot(cfg: Config):
+    """At most [render] max_renders encodes at once, across threads and processes."""
     n = max(1, int(cfg.render["max_renders"]))
     with _slots_lock:
-        return _render_slots.setdefault(n, threading.BoundedSemaphore(n))
+        gate = _render_slots.setdefault(n, threading.BoundedSemaphore(n))
+    with gate, _machine_slot(cfg.data_dir, n):
+        yield
 
 
 def render_video(cfg: Config, folder: Path, layout: str = "auto") -> dict:

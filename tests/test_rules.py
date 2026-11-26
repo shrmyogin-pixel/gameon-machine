@@ -92,6 +92,85 @@ class StorySelectionTests(unittest.TestCase):
         self.assertFalse(kept("Ubisoft devs talk about crunch"))
         self.assertTrue(kept("Ubisoft announces a new release date for its next game"))
 
+class GtaOnlyTests(unittest.TestCase):
+    def test_only_real_gta_headlines_qualify(self):
+        from clipper import gta
+        for good in ("GTA 6 easter egg found in the second trailer", "GTA Online weekly update adds a new car",
+                     "Grand Theft Auto VI delay rumour denied"):
+            self.assertTrue(gta.is_gta_story(good), good)
+        for bad in ("This GTA-like heist game is great", "Zelda patch out now", "GTA Online modded accounts for sale",
+                    "GTA 6 beta download link appears"):
+            self.assertFalse(gta.is_gta_story(bad), bad)
+        self.assertFalse(gta.is_gta_story("Rockstar staff vote on a union", "The GTA maker held a ballot."))
+
+    def test_several_angles_pass_but_the_same_event_does_not_repeat(self):
+        from types import SimpleNamespace as NS
+        from clipper import gta
+        picks = [NS(score=s, story=NS(title=t)) for s, t in (
+            (9, "GTA 6 breaks first weekend sales record"), (8, "GTA 6 first weekend sales record confirmed by Take-Two"),
+            (7, "GTA 6 players find a hidden alligator easter egg"), (6, "GTA Online weekly bonus cars"))]
+        kept, dropped = gta.enforce_angles(picks, [])
+        self.assertEqual([p.score for p in kept], [9, 7, 6])
+        self.assertEqual(len(dropped), 1)
+        self.assertEqual(gta.enforce_angles(picks[2:3], ["Hidden alligator easter egg in GTA 6"])[0], [])
+
+    def test_the_mode_filters_feeds_extends_the_window_and_is_undone_afterwards(self):
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+        from pathlib import Path
+        from unittest import mock
+        import feedparser
+        from tests.test_news import rss
+        cfg = load_config()
+        now = datetime.now(timezone.utc)
+        items = [(f"GTA 6 {word} spotted", f"https://x.com/{i}", "", now - timedelta(hours=30))
+                 for i, word in enumerate(("alligator", "helicopter", "casino heist glitch", "jetski"))]
+        items.append(("Zelda patch out now", "https://x.com/z", "", now - timedelta(hours=1)))
+        seen = {}
+
+        def fake_pick(c, stories, n, work):
+            seen["titles"], seen["only"] = [s.title for s in stories], c.news.get("only")
+            seen["prompt"] = news.build_prompt(c, stories, n)
+            return []
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            cfg.database = Path(tmp) / "c.sqlite"
+            cfg.raw = {**cfg.raw, "news": {**cfg.raw["news"], "feeds": [{"name": "X", "url": "u"}]}}
+            with mock.patch.object(feedparser, "parse", return_value=rss(items)), \
+                    mock.patch.object(news, "pick_stories", fake_pick):
+                result = news.run_news(cfg, dry_run=True, only="gta")
+        self.assertEqual(len(seen["titles"]), 3)                  # 30 h old stories count; "casino" and Zelda do not
+        self.assertIn("GTA-ONLY RUN", seen["prompt"])
+        self.assertEqual(seen["only"], "gta")
+        self.assertIsNone(cfg.news.get("only"))
+        self.assertEqual(result.note, "no story worth making this time")
+
+    def test_the_pill_says_gta_6_only_for_gta_6(self):
+        self.assertEqual(badge_label("flagship", subject="GTA 6"), "GTA 6")
+        self.assertEqual(badge_label("flagship", subject="GTA Online"), "GTA")
+        self.assertEqual(badge_label("flagship", subject="GTA V"), "GTA")
+
+    def test_the_command_and_batch_file(self):
+        self.assertIn("-m clipper news --only-gta %*", (PROJECT_ROOT / "gta.bat").read_text(encoding="utf-8"))
+        self.assertNotIn("gta", (PROJECT_ROOT / "news.bat").read_text(encoding="utf-8").lower())
+
+
+class RenderSlotTests(unittest.TestCase):
+    def test_a_second_process_cannot_take_the_render_slot(self):
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+        probe = ("import msvcrt, sys; h = open(sys.argv[1], 'a+b'); h.seek(0)\n"
+                 "try: msvcrt.locking(h.fileno(), msvcrt.LK_NBLCK, 1); print('free')\n"
+                 "except OSError: print('busy')")
+
+        def state(path):
+            return subprocess.run([sys.executable, "-c", probe, str(path)], capture_output=True, text=True).stdout.strip()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            with render._machine_slot(Path(tmp), 1):
+                self.assertEqual(state(Path(tmp) / "render-0.lock"), "busy")
+            self.assertEqual(state(Path(tmp) / "render-0.lock"), "free")
+
 
 if __name__ == "__main__":
     unittest.main()
