@@ -29,6 +29,8 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 ## Pictures and hooks
 - 8-10 real pictures per news Short (at least 5, else skip the story). No placeholders or generated cards.
 - Reject low-res (under 1000x560 either way up), blurry, odd-shaped and duplicate pictures (`newsimage.save_picture`).
+- Never an outlet's own promo graphic (subscribe / follow / newsletter banners).
+- A Short avoids pictures that Shorts of the last 48 hours showed, reusing one only to avoid having too few.
 - Hooks: curiosity gap or concrete stake, never the headline read back, no vague "Nobody expected this" teaser,
   and the first script sentence adds a new fact (`hookscore.py`, `news.validate_reply`).
 

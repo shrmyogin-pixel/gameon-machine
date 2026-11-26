@@ -644,9 +644,17 @@ def collect_visuals(cfg: Config, story: Story, folder: Path, topic: str | None =
     want, floor = int(cfg.news["images_min"]), int(cfg.news["images_floor"])
     if len(visuals) < want:
         topic = (topic or story.title or "").strip()
-        extra = imagesearch.fetch_topic_images(
-            topic, folder, cfg.data_dir / "image_cache", int(cfg.news["images_max"]) - len(visuals),
-            imagesearch.hashes_of([v["file"] for v in visuals]), len(visuals) + 1, float(cfg.news["image_timeout"]))
+
+        def search(need: int, known: list, start_n: int) -> list[dict]:
+            return imagesearch.fetch_topic_images(topic, folder, cfg.data_dir / "image_cache", need, known, start_n,
+                                                  float(cfg.news["image_timeout"]))
+        room = int(cfg.news["images_max"]) - len(visuals)
+        have = imagesearch.hashes_of([v["file"] for v in visuals])
+        used = _recently_used_pictures(cfg)
+        extra = search(room, have + used, len(visuals) + 1)           # pictures recent Shorts have not shown ...
+        if used and len(visuals) + len(extra) < want:                 # ... and only then repeats, rather than too few
+            extra += search(room - len(extra), have + imagesearch.hashes_of([e["file"] for e in extra]),
+                            len(visuals) + len(extra) + 1)
         topical = [{**f, "kind": "topic"} for f in extra]
         mixed, a, t = [], list(visuals), topical      # article, topic, article, topic ... so the cuts alternate
         while a or t:
@@ -661,6 +669,19 @@ def collect_visuals(cfg: Config, story: Story, folder: Path, topic: str | None =
         raise NewsError(f"only {len(visuals)} real picture(s) found for '{topic or story.title}' (need {floor}); "
                         "skipping rather than showing placeholders")
     return visuals
+
+
+def _recently_used_pictures(cfg: Config) -> list:
+    """Fingerprints of the pictures shown in the last [news] picture_repeat_hours, so two Shorts about one game differ."""
+    hours = float(cfg.news.get("picture_repeat_hours", 48))
+    if hours <= 0:
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        return db.recent_used_pictures(cfg.database, since)
+    except Exception:
+        log.exception("news: could not read the used pictures (ignored)")
+        return []
 
 
 def choose_music(cfg: Config, seed: str) -> dict | None:
@@ -747,6 +768,11 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         db.record_analysis(cfg.database, folder.name, analysis, folder / "analysis.json")
         db.record_files(cfg.database, folder.name, folder)
         db.set_clip_status(cfg.database, folder.name, "rendered")
+        try:
+            from .imagesearch import hashes_of
+            db.add_used_pictures(cfg.database, hashes_of([v["file"] for v in visuals]))
+        except Exception:
+            log.exception("[%s] could not remember its pictures (ignored)", folder.name)
         try:
             from . import topics
             topics.remember(cfg, pick)                                   # so this game is not repeated for 24 h

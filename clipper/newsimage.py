@@ -48,6 +48,11 @@ IMAGE_NAME = "news_image_{n}.jpg"
 META_KEYS = ("og:image:secure_url", "og:image", "twitter:image", "twitter:image:src")
 JUNK = re.compile(r"(logo|favicon|sprite|avatar|icon|placeholder|blank|pixel|1x1|gravatar|emoji|badge|spacer|"
                   r"(^|[-_/.])(ads?|advert\w*|banner|sponsor\w*|promo|tracking|share|button|author|profile)([-_/.]|$))", re.I)
+# the outlet advertising itself ("SUBSCRIBE ON YOUTUBE"): by file name / alt text, or by where clicking it leads
+PROMO = re.compile(r"c2a|(?<![a-z])cta(?![a-z])|newsletter|follow[-_ ]?us|join[-_ ]?us|subscribe[-_ ]?(?:on|to|now|banner|button)|"
+                   r"(?:youtube|discord|whatsapp|telegram)[-_ ]?(?:sub|subscribe|banner|promo|join)|patreon|google[-_ ]?news", re.I)
+PROMO_LINK = re.compile(r"youtube\.com/(?:@|c/|channel/|user/)|sub_confirmation|discord\.(?:gg|com/invite)|patreon\.com|"
+                        r"news\.google\.com|whatsapp\.com/channel|//t\.me/", re.I)
 SKIP_PARENTS = {"nav", "header", "footer", "aside", "form", "button", "svg", "script", "style", "noscript"}
 SIZE_SUFFIX = re.compile(r"-\d{2,4}x\d{2,4}(?=\.\w+$)")
 
@@ -71,7 +76,8 @@ def _usable_url(url: str | None, name_blob: str = "") -> bool:
     path = urllib.parse.urlsplit(url).path.lower()
     if path.endswith((".svg", ".gif", ".ico")):
         return False
-    return not JUNK.search(path.rsplit("/", 1)[-1]) and not JUNK.search(name_blob or "")
+    name = path.rsplit("/", 1)[-1]
+    return not any(rule.search(text) for rule in (JUNK, PROMO) for text in (name, name_blob or ""))
 
 
 def images_from_entry(entry) -> list[str]:
@@ -149,6 +155,8 @@ class _PageParser:
                 continue
             if any(p.name in SKIP_PARENTS for p in tag.parents if p.name):
                 continue
+            if any(p.name == "a" and PROMO_LINK.search(p.get("href") or "") for p in tag.parents):
+                continue                                    # a banner that sends readers to the outlet's own channel
             url = (_best_from_srcset(tag.get("srcset") or tag.get("data-srcset") or "") or tag.get("data-src")
                    or tag.get("data-lazy-src") or tag.get("data-original") or tag.get("src"))
             w, h = _num(tag.get("width")), _num(tag.get("height"))

@@ -202,6 +202,61 @@ class CreatorsOnlyTests(unittest.TestCase):
             self.assertNotIn("creators", (PROJECT_ROOT / name).read_text(encoding="utf-8").lower())
 
 
+class PictureChoiceTests(unittest.TestCase):
+    def test_promo_banners_are_not_article_pictures(self):
+        from clipper import newsimage
+        page = """<article>
+          <img src="https://x.com/uploads/2024/05/YouTubeC2A.jpeg" width="1280">
+          <a href="https://www.youtube.com/@outlet?sub_confirmation=1"><img src="https://x.com/banner-art.jpg" width="1280"></a>
+          <a href="https://discord.gg/abc"><img src="https://x.com/community.jpg" width="1280"></a>
+          <img src="https://x.com/join-us-newsletter.png" width="1280">
+          <img src="https://x.com/GTA-6-YouTube-trailer-screenshot.jpg" width="1280">
+          <img src="https://x.com/octane-cta-ctahonda-race.jpg" width="1280">
+          <a href="https://x.com/full.jpg"><img src="https://x.com/GTA-6-Animal-Hunting.jpg" width="1280"></a>
+        </article>"""
+        got = [u.rsplit("/", 1)[1] for u in newsimage.article_images(page, "https://x.com/a")]
+        self.assertEqual(got, ["GTA-6-YouTube-trailer-screenshot.jpg", "GTA-6-Animal-Hunting.jpg"])
+
+    def run_visuals(self, used_before: int, fresh_available: int):
+        """collect_visuals with a fake search over pictures 0..N: -> the picture numbers the new Short got."""
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        import cv2
+        import numpy as np
+        from clipper import db, imagesearch, newsimage
+        from tests.test_imagesearch import photo
+        from tests.test_news import story
+        pool = [photo(1280, 720, seed=100 + i) for i in range(used_before + fresh_available)]
+
+        def print_of(data):
+            return newsimage.fingerprint(cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR))
+
+        def search(topic, folder, cache, need, known, start_n, timeout=15.0):
+            out = []
+            for i, data in enumerate(pool):
+                if len(out) >= need:
+                    break
+                f = Path(folder) / f"news_image_{start_n + len(out)}.jpg"
+                if newsimage.save_picture(data, f, list(known) + [print_of(pool[o["n"]]) for o in out]):
+                    out.append({"file": f, "url": None, "source": "cache", "n": i})
+            return out
+        cfg = load_config()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            cfg.database = Path(tmp) / "c.sqlite"
+            cfg.raw = {**cfg.raw, "news": {**cfg.raw["news"], "images_min": 4, "images_max": 4, "images_floor": 3}}
+            db.add_used_pictures(cfg.database, [print_of(d) for d in pool[:used_before]])
+            with mock.patch.object(news, "fetch_news_images", return_value=[]), \
+                    mock.patch.object(imagesearch, "fetch_topic_images", search):
+                return [v["n"] for v in news.collect_visuals(cfg, story(1), Path(tmp), "GTA 6")]
+
+    def test_pictures_of_recent_shorts_are_left_out(self):
+        self.assertEqual(self.run_visuals(used_before=3, fresh_available=4), [3, 4, 5, 6])
+
+    def test_repeats_fill_in_only_when_there_are_not_enough_new_ones(self):
+        self.assertEqual(self.run_visuals(used_before=4, fresh_available=2), [4, 5, 0, 1])
+
+
 class RenderSlotTests(unittest.TestCase):
     def test_a_second_process_cannot_take_the_render_slot(self):
         import subprocess
