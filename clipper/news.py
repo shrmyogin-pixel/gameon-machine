@@ -33,7 +33,7 @@ from .config import PROJECT_ROOT, Config, get_env_key
 from .buckets import BUCKETS, classify, enforce_mix
 from .hookscore import HookScore, banned_in, closer_banned, names_subject, opener_of, rank_hooks, restates_hook, words_of
 from .lifecycle import story_keys, url_key
-from .newsimage import fetch_news_images, images_from_entry
+from .newsimage import fetch_news_images, images_from_entry, set_wikimedia_contact
 from .profanity import mask
 
 log = logging.getLogger("clipper")
@@ -597,6 +597,7 @@ def collect_visuals(cfg: Config, story: Story, folder: Path, topic: str | None =
 
     -> [{'file', 'url', 'source', 'kind': 'article' | 'topic'}]."""
     from . import imagesearch
+    set_wikimedia_contact(str(cfg.news.get("wikimedia_contact", "")))
     try:
         if story.trend and story.trend.get("source") == "youtube":
             found = []                       # never reuse a third-party video's thumbnail: topic screenshots only

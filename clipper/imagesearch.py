@@ -32,6 +32,7 @@ PER_QUERY = 3                        # pictures kept from one query on the first
 SUFFIXES = ("screenshot", "gameplay", "official art", "key art", "in-game screenshot", "screenshot 4k",
             "press kit screenshot", "streaming")
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+COMMONS_SUFFIXES = SUFFIXES[:2]      # Commons is a small, shared, free service: ask it twice per game, not for every suffix
 STOP = {"the", "a", "an", "of", "and", "for", "to", "in", "on", "game", "games", "gaming", "new", "free", "pc", "ps5", "ps4",
         "xbox", "steam", "epic", "nintendo", "switch", "playstation"}
 
@@ -122,7 +123,7 @@ def search_ddgs(query: str, limit: int = 12) -> list[dict]:
 def search_commons(query: str, limit: int = 10, timeout: float = 15.0) -> list[dict]:
     """The same from Wikimedia Commons (free, no key). [] on any failure."""
     params = {"action": "query", "format": "json", "generator": "search", "gsrnamespace": "6", "gsrlimit": str(limit),
-              "gsrsearch": query, "prop": "imageinfo", "iiprop": "url|size|mime", "iiurlwidth": "1600"}
+              "gsrsearch": query, "prop": "imageinfo", "iiprop": "url|size|mime", "iiurlwidth": "1920"}      # must be one of Wikimedia's standard thumbnail widths
     try:
         raw, _ = newsimage.download_retry(COMMONS_API + "?" + urllib.parse.urlencode(params), 2_000_000, timeout, tries=2)
         pages = (json.loads(raw.decode("utf-8", "replace")).get("query") or {}).get("pages") or {}
@@ -224,7 +225,8 @@ def fetch_topic_images(topic: str, folder: Path, cache_root: Path, need: int, kn
                 break
             query = f"{topic} {suffix}"
             from_query = 0
-            for hit in search_ddgs(query) + search_commons(query, timeout=timeout):
+            commons = search_commons(query, timeout=timeout) if suffix in COMMONS_SUFFIXES else []
+            for hit in search_ddgs(query) + commons:
                 if full():
                     break
                 if from_query >= PER_QUERY:

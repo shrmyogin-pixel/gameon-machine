@@ -16,11 +16,13 @@ Short's credit line names the outlet and the exact article URL.
 """
 from __future__ import annotations
 
+import gzip
 import html
 import ipaddress
 import logging
 import re
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -237,19 +239,91 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+# ------------------------------------------------------------------ Wikimedia's robot policy
+# https://wikitech.wikimedia.org/wiki/Robot_policy and the Foundation's User-Agent policy: say who you are (never pose as
+# a browser), one request at a time, leave gaps between them, and after a 429 / 503 wait as long as Retry-After says.
+WIKIMEDIA_AGENT = "gameon-clipper-bot/1.0"
+GAP_WITH_CONTACT = 1.0          # seconds between requests: identified bots may make 200 a minute ...
+GAP_ANONYMOUS = 6.5             # ... and clients without contact details only 10 a minute
+SLOW_REQUEST_GAP = 5.0          # after a request the server needed more than a second for
+_wikimedia = {"contact": "", "next": 0.0, "blocked_until": 0.0}
+_wikimedia_lock = threading.Lock()
+
+
+class WikimediaBusy(ValueError):
+    """Wikimedia asked us to back off; nothing is sent until then (a ValueError, so it is never retried)."""
+
+
+def set_wikimedia_contact(contact: str) -> None:
+    """A website or e-mail address Wikimedia can reach you at ([news] wikimedia_contact); '' for none."""
+    _wikimedia["contact"] = re.sub(r"[^\x20-\x7e]|[()]", "", contact or "").strip()
+
+
+def is_wikimedia(url: str) -> bool:
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in ("wikimedia.org", "wikipedia.org"))
+
+
+def wikimedia_agent() -> str:
+    contact = _wikimedia["contact"]
+    return f"{WIKIMEDIA_AGENT} ({contact})" if contact else WIKIMEDIA_AGENT
+
+
+def _retry_after(headers) -> float:
+    """Seconds from a Retry-After header; at least 5 when it is missing or unreadable."""
+    try:
+        return max(float(headers.get("Retry-After")), 5.0)
+    except (TypeError, ValueError, AttributeError):
+        return 60.0
+
+
+def _fetch(req, limit: int, timeout: float) -> tuple[bytes, str]:
+    opener = urllib.request.build_opener(_SafeRedirect)
+    with opener.open(req, timeout=timeout) as resp:
+        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        data = resp.read(limit + 1)
+        if (resp.headers.get("Content-Encoding") or "").lower() == "gzip":
+            data = gzip.decompress(data)
+    return data, ctype
+
+
+def _fetch_politely(req, limit: int, timeout: float) -> tuple[bytes, str]:
+    with _wikimedia_lock:                                       # one Wikimedia request at a time
+        now = time.monotonic()
+        if now < _wikimedia["blocked_until"]:
+            raise WikimediaBusy(f"Wikimedia asked to wait {_wikimedia['blocked_until'] - now:.0f}s more")
+        if _wikimedia["next"] > now:
+            time.sleep(_wikimedia["next"] - now)
+        started = time.monotonic()
+        try:
+            return _fetch(req, limit, timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 503):
+                wait = _retry_after(exc.headers)
+                _wikimedia["blocked_until"] = time.monotonic() + wait
+                log.info("Wikimedia answered %d: leaving it alone for %.0fs", exc.code, wait)
+            raise
+        finally:
+            gap = GAP_WITH_CONTACT if _wikimedia["contact"] else GAP_ANONYMOUS
+            if time.monotonic() - started > 1.0:
+                gap = max(gap, SLOW_REQUEST_GAP)
+            _wikimedia["next"] = time.monotonic() + gap
+
+
 def download(url: str, limit: int, timeout: float, truncate: bool = False, referer: str | None = None) -> tuple[bytes, str]:
     """-> (bytes, content type). Raises on anything unsafe or slow, and on too big unless `truncate` (pages: the
     tags we need are early, so the first `limit` bytes are enough)."""
     if not public_host(url):
         raise ValueError("not a public http(s) address")
-    opener = urllib.request.build_opener(_SafeRedirect)
-    headers = {"User-Agent": USER_AGENT, "Accept": "image/*,text/html;q=0.8,*/*;q=0.5"}
+    wikimedia = is_wikimedia(url)
+    headers = {"User-Agent": wikimedia_agent() if wikimedia else USER_AGENT,
+               "Accept": "image/*,text/html;q=0.8,*/*;q=0.5"}
+    if wikimedia and "/w/api.php" in url:
+        headers["Accept-Encoding"] = "gzip"
     if referer:
         headers["Referer"] = referer                    # many CDNs block hotlinking unless the article page is the referer
     req = urllib.request.Request(url, headers=headers)
-    with opener.open(req, timeout=timeout) as resp:
-        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        data = resp.read(limit + 1)
+    data, ctype = (_fetch_politely if wikimedia else _fetch)(req, limit, timeout)
     if len(data) > limit:
         if not truncate:
             raise ValueError("download too large")
@@ -267,7 +341,7 @@ def download_retry(url: str, limit: int, timeout: float, truncate: bool = False,
             return download(url, limit, timeout, truncate, referer=referer)
         except urllib.error.HTTPError as exc:
             last = exc
-            if exc.code in (400, 404, 410):
+            if exc.code in (400, 404, 410) or (is_wikimedia(url) and exc.code in (403, 429, 503)):
                 break
             referer = referer or f"{urllib.parse.urlsplit(url).scheme}://{urllib.parse.urlsplit(url).netloc}/"
         except ValueError:

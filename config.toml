@@ -91,6 +91,7 @@ images_min = 8                     # fewer unique real pictures than this -> top
 images_max = 10                    # 8-10 real pictures per Short, cut every 2.5-4.5 s so none repeats (never generated cards or text slides)
 images_floor = 5                   # still fewer than this after the screenshot search -> the story is skipped
 image_timeout = 15                 # seconds per picture / article-page download (each is retried)
+wikimedia_contact = ""             # website or e-mail sent to Wikimedia only, as its robot policy asks; "" = slower (10 requests a minute)
 # Article pictures: og:image, twitter:image, <picture>/srcset/data-src and in-article <img> (at least 1000x560 and in focus, no logos/ads).
 # Top-up pictures: "<game> screenshot" / "<game> gameplay" via ddgs (DuckDuckGo Images) + Wikimedia Commons, cached in
 # data/image_cache/<game>/ and validated with PIL + OpenCV before use.
