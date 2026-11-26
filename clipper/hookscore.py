@@ -11,8 +11,9 @@ score_hook() gives 0-10:
 The four parts above are scaled to 7 points and the curiosity bonus adds up to 3, so a plain "X just did Y" headline hook
 tops out at 7 while a hook with a gap or a stake can reach 10.
 A hook of more than 12 words, or one containing banned filler, is invalid and scores 0.
-Two penalties on the total: a bare stock opener ("Stop scrolling if you play X" with nothing at stake) loses 2, and a plain
-headline read ("X is / just / gets ..." with no gap or stake) loses 1.
+Three penalties on the total: a bare stock opener ("Stop scrolling if you play X" with nothing at stake) loses 4.5, a vague
+teaser that says nothing concrete ("Nobody expected this ...", "a surprising call") loses 2.5, and a plain headline read
+("X is / just got / gets ..." with no gap or stake) loses 2.
 
 Pure functions, no I/O.
 """
@@ -79,6 +80,16 @@ CURIOSITY = (r"stop scrolling", r"stop what", r"nobody", r"no one", r"never", r"
 # concrete stakes: what the viewer stands to lose
 CURIOSITY += (r"your (?:clock|time|save|saves|library|progress|money|account)", r"ticking", r"expiry", r"last chance",
               r"for good", r"forever", r"\blos(?:e|es|ing)\b", r"disappear", r"vanish")
+
+# a possible consequence for the viewer ("Your library could ...")
+CURIOSITY += (r"\byour\b.*\b(?:could|might|is about to|are about to)\b",)
+
+# teasers that point at something without saying anything about it
+VAGUE = re.compile(r"\b(?:nobody|no one) (?:expected|saw|thought)\b.*\bthis\b|"
+                   r"\b(?:surprising|surprise|big|huge|major|bold|strange) (?:call|move|news|decision|confession|change)\b|"
+                   r"\bsomething (?:big|huge|new|special)\b|\bchang(?:ed|es) everything\b", re.I)
+# newsroom phrasing: reads as a headline wherever the name sits
+HEADLINE_PHRASES = re.compile(r"\b(?:just got|just gets|gets a new|is getting|has been|have been)\b", re.I)
 
 # "Stop scrolling if you play X" and nothing else: no consequence, no gap
 STOCK_OPENER = re.compile(r"^stop scrolling[,:]? if you (?:still )?(?:play|own|have|love) [^,:;?]+?[.!]?$", re.I)
@@ -194,12 +205,15 @@ def score_hook(hook: str, subjects: list[str] | tuple = ()) -> HookScore:
     base = sum(v for k, v in res.parts.items() if k != "curiosity")
     total = min(base * 0.7 + res.parts["curiosity"], 10.0)
     if STOCK_OPENER.match(hook.strip()):
-        res.parts["stock_opener"] = -2.0
+        res.parts["stock_opener"] = -4.5
         res.reasons.append("bare stock opener: say what is at stake")
-    elif not cues and _reads_as_headline(toks, names):
-        res.parts["plain_headline"] = -1.0
+    elif not cues and (_reads_as_headline(toks, names) or HEADLINE_PHRASES.search(hook)):
+        res.parts["plain_headline"] = -2.0
         res.reasons.append("reads like a plain headline")
-    total += res.parts.get("stock_opener", 0.0) + res.parts.get("plain_headline", 0.0)
+    if VAGUE.search(hook):
+        res.parts["vague"] = -2.5
+        res.reasons.append("vague teaser: name the concrete thing at stake")
+    total += sum(res.parts.get(k, 0.0) for k in ("stock_opener", "plain_headline", "vague"))
     res.total = round(max(total, 0.0), 2)
     return res
 
@@ -218,6 +232,11 @@ def rank_hooks(hooks: list[str], subjects: list[str] | tuple = ()) -> list[HookS
     """Every hook scored, best first (valid before invalid; on a tie the stronger curiosity gap, then original order)."""
     scored = [score_hook(h, subjects) for h in hooks]
     return sorted(scored, key=lambda s: (not s.valid, -s.total, -s.parts.get("curiosity", 0.0)))
+
+
+def opener_of(hook: str) -> str:
+    """The first two words, lower case: what makes two hooks in one batch sound alike."""
+    return " ".join(words_of(hook)[:2]).lower()
 
 
 def best_hook(hooks: list[str], subjects: list[str] | tuple = ()) -> HookScore | None:

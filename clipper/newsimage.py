@@ -33,13 +33,15 @@ USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHT
               "Chrome/124.0 Safari/537.36")      # a plain bot UA gets 403 from many image CDNs
 MAX_PAGE_BYTES = 1_500_000
 MAX_IMAGE_BYTES = 12_000_000
-MIN_WIDTH, MIN_HEIGHT = 600, 300          # "high-res": smaller pictures look soft on a 1080x1920 Short
+MIN_WIDTH, MIN_HEIGHT = 1000, 560         # long side / short side: smaller pictures look soft on a 1080x1920 Short
+MIN_SHARPNESS = 60.0                      # see sharpness(): motion-blurred frames measured 20-51, in-focus art 72 and up
 MAX_ASPECT = 2.4                          # width / height: wider than this is a banner, not a photo
 MIN_ASPECT = 0.4
 MAX_SIDE = 2400                           # larger pictures are shrunk before saving (the Short is 1080x1920)
-MAX_ATTEMPTS = 14                         # downloads tried per story
+MAX_ATTEMPTS = 20                         # downloads tried per story
 DEADLINE_SECONDS = 90                     # whole picture hunt per story
-DUPLICATE_BITS = 6                        # perceptual-hash distance (of 64) at or below which two pictures are the same
+DUPLICATE_BITS = 6                        # average-hash distance (of 64) at or below which two pictures are the same
+DUPLICATE_DCT_BITS = 8                    # same for the DCT hash, which survives recompression and brightness changes
 IMAGE_NAME = "news_image_{n}.jpg"
 META_KEYS = ("og:image:secure_url", "og:image", "twitter:image", "twitter:image:src")
 JUNK = re.compile(r"(logo|favicon|sprite|avatar|icon|placeholder|blank|pixel|1x1|gravatar|emoji|badge|spacer|"
@@ -285,6 +287,44 @@ def ahash(img) -> int:
     return sum(1 << i for i, b in enumerate(bits) if b)
 
 
+def dct_hash(img) -> int:
+    """64-bit DCT perceptual hash: the low-frequency layout of the picture, ignoring brightness and compression."""
+    import cv2
+    import numpy as np
+    small = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), (32, 32), interpolation=cv2.INTER_AREA)
+    low = cv2.dct(np.float32(small))[:8, :8].flatten()
+    bits = low > np.median(low[1:])
+    return sum(1 << i for i, b in enumerate(bits) if b)
+
+
+def fingerprint(img) -> tuple[int, int]:
+    return ahash(img), dct_hash(img)
+
+
+def is_duplicate(a: tuple[int, int], b: tuple[int, int]) -> bool:
+    return bin(a[0] ^ b[0]).count("1") <= DUPLICATE_BITS or bin(a[1] ^ b[1]).count("1") <= DUPLICATE_DCT_BITS
+
+
+def big_enough(width: int, height: int) -> bool:
+    """Landscape or portrait: the long side and the short side both have to be large enough."""
+    return max(width, height) >= MIN_WIDTH and min(width, height) >= MIN_HEIGHT
+
+
+def sharpness(img) -> float:
+    """Edge strength of the sharpest areas (90th percentile of the Laplacian variance over a 6x6 grid, measured at 960 px),
+    so a crisp subject in front of a soft background still passes and an out-of-focus or stretched picture does not."""
+    import cv2
+    import numpy as np
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    scale = 960 / max(gray.shape)
+    if scale < 1:
+        gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    h, w = gray.shape
+    tiles = [lap[y * h // 6:(y + 1) * h // 6, x * w // 6:(x + 1) * w // 6].var() for y in range(6) for x in range(6)]
+    return float(np.percentile(tiles, 90))
+
+
 def looks_like_web_page(img) -> bool:
     """A screenshot of a store / subscription / settings page rather than game art: mostly near-white, low-colour pixels
     (game art, even bright art, is far more saturated: measured 0-24 % pale pixels vs 80 % for a store page)."""
@@ -295,7 +335,7 @@ def looks_like_web_page(img) -> bool:
     return pale > 0.35 and float(sat.mean()) < 45
 
 
-def save_picture(data: bytes, dest: Path, known_hashes: list[int] | None = None) -> dict | None:
+def save_picture(data: bytes, dest: Path, known_hashes: list | None = None) -> dict | None:
     """Decode `data`; if it is a usable, not-yet-seen photo save it as a JPEG at `dest`.
 
     -> {'width', 'height', 'hash'} or None. `known_hashes`: hashes of pictures already kept (duplicates are refused)."""
@@ -305,14 +345,16 @@ def save_picture(data: bytes, dest: Path, known_hashes: list[int] | None = None)
     if img is None:
         return None
     h, w = img.shape[:2]
-    if w < MIN_WIDTH or h < MIN_HEIGHT or not MIN_ASPECT <= w / h <= MAX_ASPECT:
+    if not big_enough(w, h) or not MIN_ASPECT <= w / h <= MAX_ASPECT:
         return None
     if float(img.std()) < 6.0:                                   # an almost flat picture: a placeholder, not a photo
         return None
     if looks_like_web_page(img):                                 # a store / subscription / settings page screenshot
         return None
-    digest = ahash(img)
-    if any(bin(digest ^ k).count("1") <= DUPLICATE_BITS for k in (known_hashes or [])):
+    if sharpness(img) < MIN_SHARPNESS:                           # blurred, or a thumbnail stretched to a big size
+        return None
+    digest = fingerprint(img)
+    if any(is_duplicate(digest, k) for k in (known_hashes or [])):
         return None
     if max(w, h) > MAX_SIDE:
         s = MAX_SIDE / max(w, h)
@@ -333,7 +375,7 @@ def fetch_news_images(story, folder: Path, timeout: float = 15.0, want: int = 5)
 
     -> [{'file': Path, 'url', 'source': 'feed' | 'og:image' | 'article', 'width', 'height'}, ...]. Never raises."""
     kept: list[dict] = []
-    hashes: list[int] = []
+    hashes: list = []
     tried: set[str] = set()
     attempts = 0
     deadline = time.monotonic() + DEADLINE_SECONDS
@@ -358,7 +400,7 @@ def fetch_news_images(story, folder: Path, timeout: float = 15.0, want: int = 5)
                     tried.add(ident)
                     kept.append({"file": folder / IMAGE_NAME.format(n=len(kept) + 1), "url": u, "source": source, **info})
                     return
-                log.info("news image: %s skipped (too small, odd shape, flat or a duplicate)", u[:100])
+                log.info("news image: %s skipped (too small, odd shape, blurry, flat or a duplicate)", u[:100])
             except Exception as exc:
                 log.info("news image: %s failed (%s: %s)", u[:100], type(exc).__name__, str(exc)[:80])
 

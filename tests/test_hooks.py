@@ -13,8 +13,38 @@ class StakesHookTests(unittest.TestCase):
     def test_bare_stock_opener_is_penalised_but_one_with_a_stake_is_not(self):
         bare = score_hook("Stop scrolling if you play Mario Kart World.", ["Mario Kart World"])
         stake = score_hook("Stop scrolling if you love puzzles: Last Room's free.", ["Last Room"])
-        self.assertEqual(bare.parts["stock_opener"], -2.0)
+        self.assertEqual(bare.parts["stock_opener"], -4.5)
         self.assertNotIn("stock_opener", stake.parts)
+
+
+class WeakHookTests(unittest.TestCase):
+    def test_hooks_that_won_real_runs_now_lose_to_a_concrete_alternative(self):
+        for weak, better, subject in (
+                ("Stop scrolling if you have PS Plus.", "Three PS Plus games unlock December 1st.", "PS Plus"),
+                ("Nobody expected this confession about how a rival console began.",
+                 "Did PlayStation's creator trick Microsoft into building a console?", "PlayStation"),
+                ("Nobody expected to hear this football commentator ever again.",
+                 "Your EA Sports FC 27 matches could sound hauntingly familiar.", "EA Sports FC 27")):
+            with self.subTest(weak=weak):
+                self.assertEqual(rank_hooks([weak, better], [subject])[0].hook, better)
+
+    def test_newsroom_phrasing_and_vague_teasers_are_marked(self):
+        self.assertIn("plain_headline", score_hook("Nioh 3 DLC 2 just got a new date", ["Nioh 3"]).parts)
+        self.assertIn("vague", score_hook("Blizzard just made a surprising call about Diablo 4.", ["Diablo 4"]).parts)
+
+
+class BatchOpenerTests(unittest.TestCase):
+    def test_a_second_story_avoids_the_opening_the_first_one_used(self):
+        import json
+        from clipper import news
+        from clipper.config import load_config
+        from tests.test_news import reply, story
+        hooks = ["Your Steam library could lose a classic today", "Free on Steam today: a classic could vanish",
+                 "Steam", "Steam now", "Steam page"]
+        data = [{**reply(i), "hooks": hooks, "subjects": ["Steam"]} for i in (1, 2)]
+        picks = news.validate_reply(json.dumps({"stories": data}), [story(1), story(2)], load_config())
+        self.assertEqual(len(picks), 2)
+        self.assertNotEqual(picks[0].hook.hook, picks[1].hook.hook)
 
 
 class RepeatedHookTests(unittest.TestCase):

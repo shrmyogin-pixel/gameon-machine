@@ -158,7 +158,7 @@ class SafetyTests(unittest.TestCase):
     def test_duplicates_are_refused_even_at_another_size(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             a = newsimage.save_picture(jpeg(1280, 720, seed=5), Path(tmp) / "a.jpg")
-            small = cv2.resize(cv2.imdecode(np.frombuffer(jpeg(1280, 720, seed=5), np.uint8), 1), (960, 540))
+            small = cv2.resize(cv2.imdecode(np.frombuffer(jpeg(1280, 720, seed=5), np.uint8), 1), (1024, 576))
             smaller = cv2.imencode(".jpg", small)[1].tobytes()
             self.assertIsNone(newsimage.save_picture(smaller, Path(tmp) / "b.jpg", [a["hash"]]))
             self.assertIsNotNone(newsimage.save_picture(jpeg(1280, 720, seed=6), Path(tmp) / "c.jpg", [a["hash"]]))

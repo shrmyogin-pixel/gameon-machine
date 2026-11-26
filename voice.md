@@ -19,6 +19,8 @@
   - Bad: "Hey guys, you will not believe this." / "Breaking news today in gaming."
   - Weak: "Exoprimal is shutting down in 2027." (plain headline) / "Stop scrolling if you play Fortnite." (nothing at stake)
 - Only claim stakes the facts support.
+- No vague teasers ("Nobody expected this...", "a surprising call"): name the concrete thing and withhold only how or why.
+- Never open with "Nobody expected" or "Stop scrolling", and never open two Shorts in a batch with the same words.
 - The first sentence after the hook pays off or deepens it with a NEW fact. Never restate the hook, not even reworded or with the same date, number or verb.
 
 ## Banned filler (zero tolerance)
@@ -82,6 +84,6 @@ Never use: "what is up guys", "hey guys", "welcome back", "you won't believe",
 - Last line of the description: `Sources & Credits: <outlet / streamer / platform>, <link or handle>`
 
 ## Pictures (for the editor's awareness)
-- Every Short cuts between 4-6 REAL pictures every 2.5-4.5 s (the article's own, topped up with screenshots of the game / streamer named in the hook).
+- Every Short cuts between 8-10 REAL pictures every 2.5-4.5 s (the article's own, topped up with screenshots of the game / streamer named in the hook).
   Never a letter card, meme card or "LOL" / "GG" placeholder.
   Write about things that are visible in a game: name the game exactly as it is known so the picture search finds it.

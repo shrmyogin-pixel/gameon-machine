@@ -145,6 +145,32 @@ class PictureFilterTests(unittest.TestCase):
         self.assertFalse(imagesearch.looks_like_ui("Nioh 3 screenshot boss fight"))
 
 
+class SharpAndUniquePictureTests(unittest.TestCase):
+    def test_low_res_blurry_and_regraded_duplicates_are_refused(self):
+        import tempfile
+        from pathlib import Path
+        import cv2
+        import numpy as np
+        from clipper import newsimage
+        from tests.test_imagesearch import photo
+
+        def save(data, known=()):
+            with tempfile.TemporaryDirectory() as tmp:
+                return newsimage.save_picture(data, Path(tmp) / "p.jpg", list(known))
+
+        def encode(picture):
+            return cv2.imencode(".jpg", picture)[1].tobytes()
+
+        sharp = photo(1280, 720, seed=3)
+        img = cv2.imdecode(np.frombuffer(sharp, np.uint8), cv2.IMREAD_COLOR)
+        first = save(sharp)
+        self.assertIsNotNone(first)
+        self.assertIsNone(save(photo(600, 338, seed=3)))                                  # a related-article thumbnail
+        self.assertIsNone(save(encode(cv2.GaussianBlur(img, (0, 0), 8))))                 # out of focus
+        self.assertIsNone(save(encode(cv2.convertScaleAbs(img, alpha=0.8, beta=30)), [first["hash"]]))   # same shot, regraded
+        self.assertTrue(newsimage.big_enough(720, 1280))                                  # portrait pictures still count
+
+
 class CuriosityHookTests(unittest.TestCase):
     def test_curiosity_hooks_outscore_plain_headline_hooks(self):
         plain = score_hook("Nioh 3 DLC 2 just got a new date", ["Nioh 3"])

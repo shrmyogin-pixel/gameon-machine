@@ -3,7 +3,7 @@
 Searches for "<game> screenshot" / "<game> gameplay" with the `ddgs` package (DuckDuckGo Images, no API key) and the
 free Wikimedia Commons API, downloads the hits through the same safe downloader as the article pictures
 (newsimage.download_retry), and keeps only pictures that pass validation: PIL can open AND fully decode them, they are
-at least 600 px wide, shaped like a photo (no banners / slivers), not flat placeholders and not duplicates of a picture
+at least 1000x560 (either way up), shaped like a photo (no banners / slivers), not flat placeholders and not duplicates of a picture
 the Short already has.
 
 Every kept picture is cached in data/image_cache/<topic_slug>/ so the same game is never downloaded twice (the cache is
@@ -22,13 +22,15 @@ import urllib.parse
 from pathlib import Path
 
 from . import newsimage
-from .newsimage import MAX_ASPECT, MIN_ASPECT, MIN_HEIGHT, MIN_WIDTH
+from .newsimage import MAX_ASPECT, MIN_ASPECT, big_enough
 
 log = logging.getLogger("clipper")
 
-SEARCH_DEADLINE_SECONDS = 110        # whole topic hunt per story
-MAX_DOWNLOADS = 26                   # downloads tried per story
-SUFFIXES = ("screenshot", "gameplay", "screenshot 4k", "official art", "in-game screenshot", "key art", "streaming")
+SEARCH_DEADLINE_SECONDS = 150        # whole topic hunt per story
+MAX_DOWNLOADS = 40                   # downloads tried per story
+PER_QUERY = 3                        # pictures kept from one query on the first pass, so the Short gets varied views
+SUFFIXES = ("screenshot", "gameplay", "official art", "key art", "in-game screenshot", "screenshot 4k",
+            "press kit screenshot", "streaming")
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 STOP = {"the", "a", "an", "of", "and", "for", "to", "in", "on", "game", "games", "gaming", "new", "free", "pc", "ps5", "ps4",
         "xbox", "steam", "epic", "nintendo", "switch", "playstation"}
@@ -81,21 +83,21 @@ def validate_image(data: bytes) -> tuple[int, int] | None:
             w, h = im.size
     except Exception:
         return None
-    if w < MIN_WIDTH or h < MIN_HEIGHT or not MIN_ASPECT <= w / h <= MAX_ASPECT:
+    if not big_enough(w, h) or not MIN_ASPECT <= w / h <= MAX_ASPECT:
         return None
     return w, h
 
 
-def hash_of(path: Path) -> int | None:
+def hash_of(path: Path) -> tuple[int, int] | None:
     try:
         import cv2
         img = cv2.imread(str(path))
-        return newsimage.ahash(img) if img is not None else None
+        return newsimage.fingerprint(img) if img is not None else None
     except Exception:
         return None
 
 
-def hashes_of(files: list) -> list[int]:
+def hashes_of(files: list) -> list[tuple[int, int]]:
     return [h for h in (hash_of(Path(f)) for f in files) if h is not None]
 
 
@@ -138,7 +140,7 @@ def search_commons(query: str, limit: int = 10, timeout: float = 15.0) -> list[d
 
 
 # ------------------------------------------------------------------ the whole hunt
-def fetch_topic_images(topic: str, folder: Path, cache_root: Path, need: int, known_hashes: list[int],
+def fetch_topic_images(topic: str, folder: Path, cache_root: Path, need: int, known_hashes: list,
                        start_n: int, timeout: float = 15.0) -> list[dict]:
     """Up to `need` validated, distinct, topic-matched pictures saved as folder/news_image_<start_n..>.jpg.
 
@@ -175,43 +177,64 @@ def fetch_topic_images(topic: str, folder: Path, cache_root: Path, need: int, kn
 
         downloads = 0
         tried: set[str] = set()
-        for suffix in SUFFIXES:                            # 2. search, best query first
-            if len(kept) >= need or time.monotonic() > deadline:
+
+        def full() -> bool:
+            return len(kept) >= need or downloads >= MAX_DOWNLOADS or time.monotonic() > deadline
+
+        def take(hit: dict) -> bool:
+            """Download and keep one search hit; True when it became one of the pictures."""
+            nonlocal downloads
+            url = newsimage._http(hit["url"])
+            if not url or url in tried or not newsimage._usable_url(url):
+                return False
+            tried.add(url)
+            too_small = hit["width"] and hit["height"] and not big_enough(hit["width"], hit["height"])
+            if too_small or not relevant(topic, hit["title"], hit["page"], url):
+                return False
+            if looks_like_ui(hit["title"], url):                 # store / price / menu screenshots are not game art
+                return False
+            downloads += 1
+            probe = folder / "topic_probe.jpg"
+            try:
+                data, ctype = newsimage.download_retry(url, newsimage.MAX_IMAGE_BYTES, timeout,
+                                                       referer=hit["page"] or None, tries=2)
+                if ctype.startswith("text/") or not validate_image(data):
+                    return False
+                info = newsimage.save_picture(data, probe, hashes)   # shrinks, drops blurry, flat and duplicate pictures
+                if not info:
+                    return False
+                try:
+                    shutil.copyfile(probe, cache / (hashlib.sha1(url.encode()).hexdigest()[:12] + ".jpg"))
+                except OSError:
+                    pass                                             # the cache is a bonus
+                final = dest()
+                probe.replace(final)
+                hashes.append(info.pop("hash"))
+                kept.append({"file": final, "url": url, "source": hit["source"], **info})
+                return True
+            except Exception as exc:
+                log.info("image search: %s failed (%s: %s)", url[:100], type(exc).__name__, str(exc)[:80])
+                return False
+            finally:
+                probe.unlink(missing_ok=True)
+
+        reserve: list[dict] = []
+        for suffix in SUFFIXES:                            # 2. search, best query first, a few pictures from each
+            if full():
                 break
             query = f"{topic} {suffix}"
+            from_query = 0
             for hit in search_ddgs(query) + search_commons(query, timeout=timeout):
-                if len(kept) >= need or downloads >= MAX_DOWNLOADS or time.monotonic() > deadline:
+                if full():
                     break
-                url = newsimage._http(hit["url"])
-                if not url or url in tried or not newsimage._usable_url(url):
-                    continue
-                tried.add(url)
-                if (hit["width"] and hit["width"] < MIN_WIDTH) or not relevant(topic, hit["title"], hit["page"], url):
-                    continue
-                if looks_like_ui(hit["title"], url):                 # store / price / menu screenshots are not game art
-                    continue
-                downloads += 1
-                probe = folder / "topic_probe.jpg"
-                try:
-                    data, ctype = newsimage.download_retry(url, newsimage.MAX_IMAGE_BYTES, timeout,
-                                                           referer=hit["page"] or None, tries=2)
-                    if ctype.startswith("text/") or not validate_image(data):
-                        continue
-                    info = newsimage.save_picture(data, probe, hashes)   # shrinks, drops flat pictures and duplicates
-                    if not info:
-                        continue
-                    try:
-                        shutil.copyfile(probe, cache / (hashlib.sha1(url.encode()).hexdigest()[:12] + ".jpg"))
-                    except OSError:
-                        pass                                             # the cache is a bonus
-                    final = dest()
-                    probe.replace(final)
-                    hashes.append(info.pop("hash"))
-                    kept.append({"file": final, "url": url, "source": hit["source"], **info})
-                except Exception as exc:
-                    log.info("image search: %s failed (%s: %s)", url[:100], type(exc).__name__, str(exc)[:80])
-                finally:
-                    probe.unlink(missing_ok=True)
+                if from_query >= PER_QUERY:
+                    reserve.append(hit)
+                else:
+                    from_query += take(hit)
+        for hit in reserve:                                # 3. still short: use the rest of what the queries returned
+            if full():
+                break
+            take(hit)
     except Exception:
         log.exception("image search: unexpected error (ignored)")
     log.info("image search: %r -> %d picture(s) (%s)", topic, len(kept), ", ".join(k["source"] for k in kept) or "none")

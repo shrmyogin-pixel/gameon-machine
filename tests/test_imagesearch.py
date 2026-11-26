@@ -20,6 +20,8 @@ from clipper import imagesearch, news, newsimage
 def photo(w=1280, h=720, seed=1, fmt="JPEG") -> bytes:
     rng = np.random.default_rng(seed)
     img = cv2.GaussianBlur(cv2.resize(rng.integers(0, 255, (6, 10, 3), dtype=np.uint8), (w, h), interpolation=cv2.INTER_CUBIC), (0, 0), 20)
+    for x, y in zip(rng.integers(0, w - 12, 400), rng.integers(0, h - 12, 400)):     # fine detail: the picture is "in focus"
+        img[y:y + 12, x:x + 12] = 255 - img[y:y + 12, x:x + 12]
     buf = io.BytesIO()
     Image.fromarray(img[..., ::-1]).save(buf, fmt)
     return buf.getvalue()

@@ -1,6 +1,6 @@
 """Render a news Short: voiceover + background music + cutting visuals + dark scrim + headline card + watermark + captions.
 
-The background is 4-6 distinct REAL pictures (the article's own, see newsimage.py, topped up with topic-matched game
+The background is 8-10 distinct REAL pictures (the article's own, see newsimage.py, topped up with topic-matched game
 screenshots from imagesearch.py) with a clean cut every 2.5-4.5 seconds, each under a slow, subtle Ken Burns zoom/pan and
 a light scrim (only behind the text). There is never a gradient, text slide or generated placeholder behind the Short: a picture that cannot be
 decoded is dropped, and with none left the render fails (the story is skipped). Under the voiceover (-14 LUFS)
