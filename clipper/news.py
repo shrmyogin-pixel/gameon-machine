@@ -44,7 +44,14 @@ FALLBACK_VOICES = ("en-US-BrianNeural", "en-US-GuyNeural", "en-US-AriaNeural")  
 TTS_DEADLINE_SECONDS = 150
 # stories that are never made: gambling / betting spam, piracy, cheat tools and "free currency" scams
 HARD_SKIP = re.compile(
-    r"\b(casinos?|sportsbook|betting|gambling|gamble|bet365|online slots|poker site|stake\.com|parlay|"
+    r"\b(casinos?|sportsbooks?|bookmakers?|gambling|bet365|1xbet|betway|draftkings|fanduel|online slots|poker site|"
+    r"stake\.com|parlays?|wagering|"
+    # "betting" / "gamble" / "bet" alone are everyday idioms ("a big gamble"): they count only in a wagering context
+    r"(?:sports?|online|esports|skin|crypto|match|live|in-game)[- ]betting|"
+    r"betting (?:sites?|apps?|odds|markets?|sponsor\w*|partner\w*|compan(?:y|ies)|firms?|brands?|platforms?|operators?|"
+    r"promos?|bonus(?:es)?|tips|scandals?|ring)|"
+    r"betting on (?:(?:his|her|their) own )?(?:matches|esports|sports)|(?:place|placed|placing) bets|"
+    r"gamble (?:online|with (?:real )?money|your skins)|"
     r"fitgirl|repacks?|keygen|key generator|torrent (?:download|link|site)s?|download torrent|"
     r"pirated (?:copy|copies|download|games?)|cracked (?:apk|copy|download|version)|mod apk|apk mod|"
     r"mod menu|aimbots?|wallhacks?|hack tool|cheat (?:download|tool|software)s?|"

@@ -41,6 +41,15 @@ class UnsafeStoryTests(unittest.TestCase):
                      "A torrent of complaints hits the patch", "Free Steam game: claim it this week"):
             self.assertIsNone(news.HARD_SKIP.search(good), good)
 
+    def test_betting_idioms_are_news_but_real_wagering_is_skipped(self):
+        for idiom in ("\"I'm betting on the sickos\" - studio plans to expand the scope of RPGs", "Bungie's big gamble pays off",
+                      "Sony is betting big on handhelds", "I bet you missed this secret"):
+            self.assertIsNone(news.HARD_SKIP.search(idiom), idiom)
+        for real in ("Best esports betting sites this week", "Team signs betting sponsor", "Pro banned for betting on his own matches",
+                     "CS2 skin gambling crackdown", "New sportsbook offers a bonus", "Players placed bets on the final",
+                     "Skin betting promo code inside"):
+            self.assertTrue(news.HARD_SKIP.search(real), real)
+
     def test_a_hook_that_copies_the_headline_is_detected(self):
         title = "Exoprimal is shutting down in 2027, Capcom confirms"
         self.assertTrue(news.copies_headline(title, "Exoprimal is shutting down for good", ["Exoprimal"]))
