@@ -241,6 +241,16 @@ class ValidateTests(unittest.TestCase):
         with self.assertRaises(news.NewsError):
             self.check(reply(1), reply(1))                                            # same story twice
 
+    def test_one_bad_story_is_dropped_and_the_rest_are_kept(self):
+        with self.assertLogs("clipper", "WARNING") as logs:
+            picks = self.check(reply(1, body_words=40), reply(2))
+        self.assertEqual([p.story.id for p in picks], [2])
+        self.assertIn("story 1:", " ".join(logs.output))
+        with self.assertRaises(news.NewsError) as ctx:                                 # none pass: retried with every reason
+            self.check(reply(1, body_words=40), reply(2, score=11))
+        self.assertIn("story 1:", str(ctx.exception))
+        self.assertIn("story 2:", str(ctx.exception))
+
     def test_profanity_is_masked_everywhere(self):
         pick = self.check(reply(1, headline="GTA 6 is some shit", title="This shit is real in GTA 6"))[0]
         self.assertNotIn("shit", pick.headline.lower())

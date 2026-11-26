@@ -303,7 +303,8 @@ def final_script(hook: str, body: str) -> str:
 
 
 def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
-    """Strict checks on Claude's reply; returns the picks with their best hook chosen. Raises NewsError."""
+    """Strict checks on Claude's reply; returns the picks with their best hook chosen. A story that fails its checks is
+    dropped (and logged) and the others are kept. Raises NewsError for a malformed reply or when no story passes."""
     start, end = reply.find("{"), reply.rfind("}")
     try:
         data = json.loads(reply[start:end + 1]) if 0 <= start < end else None
@@ -314,7 +315,7 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
     by_id = {s.id: s for s in stories}
     lo, hi = int(cfg.news["script_min_words"]), int(cfg.news["script_max_words"])
     limit = int(cfg.news["stories"])
-    picks, used = [], set()
+    picks, used, rejected = [], set(), []
     for d in data["stories"][:limit]:
         if not isinstance(d, dict):
             raise NewsError("each story must be a JSON object")
@@ -382,8 +383,13 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
             if pick.sensitive and not pick.sensitive_reason:
                 raise NewsError("sensitive=true needs a sensitive_reason")
         except NewsError as exc:
-            raise NewsError(tag + str(exc))
+            rejected.append(tag + str(exc))
+            continue
         picks.append(pick)
+    if rejected and not picks:
+        raise NewsError("; ".join(rejected))            # nothing usable: the caller retries with these reasons
+    for why in rejected:
+        log.warning("news: dropped (failed checks): %s", why)
     return picks
 
 
