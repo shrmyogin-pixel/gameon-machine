@@ -499,7 +499,7 @@ class MakeShortTests(unittest.TestCase):
                 "outlet": "IGN", "title": "t"}
         words = [[0.2, 0.5, "this"], [0.5, 0.8, "is"], [0.8, 1.1, "shit"], [1.1, 1.4, "so"]]
         ass = news_render.build_news_ass(info, words, 5.0)
-        self.assertIn("FREE GAME OFFER", ass)
+        self.assertIn("FREE GAME", ass)
         import re
         plain = re.sub(r"\{[^}]*\}", "", ass)                                           # text without override tags
         self.assertIn("GTA 6 OFFICIALLY HITS PLAYSTATION RECORDS", plain)

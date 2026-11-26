@@ -60,13 +60,18 @@ Never use: "what is up guys", "hey guys", "welcome back", "you won't believe",
   - Good: "And that was only the first record." (loops into "One streamer just broke a record...")
   - Bad: "Follow Game On for more free drops."
 
-## Story mix (four buckets, so no game or creator floods a batch)
-- **Streamer & creator news** — milestones, sub / view / record achievements, big events, drama and updates.
-- **Giveaways, free games & drops** — free Epic / Steam / console games, Twitch / YouTube drops, verified creator giveaways.
-  Never real-money gambling or betting, never shady links.
-- **Major achievements & esports milestones** — world firsts, records, tournament upsets, studio milestones.
-- **What's new & worth knowing** — patches, free updates, notable releases, hidden mechanics and tips.
-- At most 2 Shorts per bucket in a run, and never two on the same game or creator.
+## Story mix (six buckets, so no game or creator floods a batch)
+| Bucket | On-screen pill | What belongs in it |
+|---|---|---|
+| flagship | `GTA 6` (other games: `BIG GAME`) | GTA 6 and flagship games: secrets, easter eggs, Twitch Drops, verified leaks, bugs |
+| freebie | `FREE GAME` | Epic / Steam / console free games, Twitch Drops, limited-time rewards |
+| update | `PATCH UPDATE` | Trailers, release dates, major patches, server shutdowns |
+| glitch | `WILD BUG` | Funny physics, exploits, community discoveries |
+| creator | `CREATOR NEWS` | Streamer milestones, roster moves, tournament upsets |
+| tech | `GAMING TECH` | GPUs, handhelds, DLSS / FSR, AI in game development |
+
+- A different bucket per Short whenever the news allows; at most 2 per bucket in a run, never two on the same game or creator.
+- Never piracy, cheat tools, free-currency scams, gambling or betting.
 
 ## Free offers
 - Always include: store/platform, price (free), start and end date/time, and region limits if any.

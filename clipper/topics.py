@@ -24,6 +24,7 @@ need know knows coming comes come date dates delay delays delayed finally today 
 month year years season seasons dlc edition remaster remake remastered sequel mode modes pass access early beta alpha
 demo store steam epic playstation xbox nintendo switch pc ps4 ps5 ps xsx series console consoles mobile ios android
 sony microsoft valve gamepass prime plus ign gamespot kotaku polygon eurogamer vg247 dexerto reddit twitch youtube
+bug bugs glitch glitches exploit exploits gpu drops handheld creator streamer esports tech
 january february march april may june july august september october november december
 says say said still back after before over under into than also like make makes made
 taking take takes real really big huge major massive full""".split())

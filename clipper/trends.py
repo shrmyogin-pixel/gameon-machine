@@ -99,7 +99,7 @@ def giveaway_trends(cfg: Config, now: datetime) -> list[Story]:
             continue
         link = str(g.get("gamerpower_url") or "")
         title = " ".join(str(g.get("title") or "").split())
-        if not link.startswith("http") or not title:
+        if not link.startswith("http") or not title or HARD_SKIP.search(f"{title} {g.get('description')}"):
             continue
         info = f"{g.get('worth', 'N/A')} value; platforms: {g.get('platforms')}; ends: {g.get('end_date')}. " \
                + " ".join(str(g.get("description") or "").split())[:200]

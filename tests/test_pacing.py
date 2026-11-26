@@ -93,29 +93,34 @@ class S:
 
 
 class BucketTests(unittest.TestCase):
-    def test_classify(self):
-        self.assertEqual(classify("Epic Games Store gives away Alan Wake 2 for free"), "giveaway")
-        self.assertEqual(classify("Kai Cenat breaks Twitch subscriber record"), "streamer")
-        self.assertEqual(classify("Team Liquid upset NaVi in the grand final"), "achievement")
-        self.assertEqual(classify("Patch 1.2 adds a hidden mechanic"), "whats_new")
+    def test_classify_covers_all_six_buckets(self):
+        for text, bucket in (("Epic Games Store gives away Alan Wake 2 for free", "freebie"),
+                             ("GTA 6 easter egg hides in the second trailer", "flagship"),
+                             ("Skate glitch launches players into orbit", "glitch"),
+                             ("Team Liquid upset NaVi in the grand final", "creator"),
+                             ("Nvidia brings DLSS to a new handheld", "tech"),
+                             ("Patch 1.2 adds a photo mode", "update")):
+            self.assertEqual(classify(text), bucket, text)
+        self.assertEqual(classify("Patch notes: bug fixes and a free update"), "update")     # not a glitch, not a giveaway
         self.assertIsNone(classify("A quiet Tuesday"))
 
     def test_balance_mixes_buckets_instead_of_taking_the_newest_forty(self):
         stories = [S(f"Patch {i} update adds changes", minutes=i) for i in range(10)]
-        stories += [S("Free game giveaway on Epic", minutes=50), S("Streamer breaks viewers record", minutes=60),
-                    S("Team wins world first final", minutes=70)]
+        others = ["Free game giveaway on Epic", "Zelda easter egg found", "A wild physics glitch", "Streamer hits a milestone",
+                  "New GPU benchmarks land"]
+        stories += [S(t, minutes=50 + i) for i, t in enumerate(others)]
         got = balance(stories, 6)
-        kinds = {classify(f"{s.title} {s.summary}") for s in got}
-        self.assertTrue({"giveaway", "streamer", "achievement", "whats_new"} <= kinds)
+        self.assertEqual({classify(f"{s.title} {s.summary}") for s in got},
+                         {"flagship", "freebie", "update", "glitch", "creator", "tech"})
 
     def test_enforce_mix_caps_one_bucket(self):
         picks = []
         for i in range(4):
             p = S(f"story {i}")
-            p.bucket, p.score = "whats_new", 9 - i
+            p.bucket, p.score = "update", 9 - i
             picks.append(p)
         other = S("other")
-        other.bucket, other.score = "giveaway", 1
+        other.bucket, other.score = "freebie", 1
         kept, dropped = enforce_mix(picks + [other], 2)
         self.assertEqual(len(kept), 3)
         self.assertEqual(len(dropped), 2)

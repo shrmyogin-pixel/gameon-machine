@@ -1,34 +1,43 @@
-"""Story buckets for the news engine, so a run mixes four kinds of Shorts instead of piling onto one game or topic:
+"""Story buckets for the news engine, so a night's Shorts mix six kinds of story instead of piling onto one game or topic:
 
-    streamer      streamer / creator news: milestones, sub / view / record achievements, big events, drama, updates
-    giveaway      legitimate giveaways: free games, Epic / Steam / console freebies, Twitch / YouTube drops, verified creator giveaways
-    achievement   world firsts, records, tournament upsets, esports and community milestones, studio milestones
-    whats_new     what's new and worth knowing: patches, free updates, notable releases, hidden mechanics and tips
+    flagship   GTA 6 and other flagship games: secrets, easter eggs, Twitch Drops, verified leaks, bugs
+    freebie    free games, giveaways, Twitch Drops and limited-time rewards
+    update     major announcements: trailers, release dates, big patches, server shutdowns
+    glitch     wild bugs and viral glitches: funny physics, exploits, community discoveries
+    creator    creator and esports news: streamer milestones, roster moves, tournament upsets
+    tech       gaming tech and AI: GPUs, handhelds, DLSS / FSR, AI in game development
 
 classify() is a keyword guess used to balance the candidate list shown to Claude; Claude then names the bucket of each
-pick, and enforce_mix() caps how many picks one bucket may take in a run. Pure functions, no I/O.
+pick, enforce_mix() caps how many picks one bucket may take in a run, and badge_label() gives the pill shown on screen.
+Pure functions, no I/O.
 """
 from __future__ import annotations
 
 import re
 
-BUCKETS = ("streamer", "giveaway", "achievement", "whats_new")
-LABELS = {"streamer": "STREAMER NEWS", "giveaway": "FREE GIVEAWAY", "achievement": "BIG ACHIEVEMENT", "whats_new": "WHAT'S NEW"}
+BUCKETS = ("flagship", "freebie", "update", "glitch", "creator", "tech")
+LABELS = {"flagship": "GTA 6", "freebie": "FREE GAME", "update": "PATCH UPDATE", "glitch": "WILD BUG",
+          "creator": "CREATOR NEWS", "tech": "GAMING TECH"}
+OTHER_FLAGSHIP_LABEL = "BIG GAME"          # a flagship story that is not about GTA must not wear a "GTA 6" badge
+GTA = re.compile(r"\b(gta|grand theft auto)\b", re.I)
 
-# whole-word / phrase patterns, checked in this order (a giveaway beats a patch note that merely mentions "free")
+# whole-word / phrase patterns, checked in ORDER (a giveaway beats a patch note that merely mentions a free game)
 PATTERNS = {
-    "giveaway": r"\b(free|giveaways?|giving away|claim|drops?|twitch drops|prime gaming|freebies?|free-to-keep|100% off)\b",
-    "streamer": r"\b(streamers?|streaming|streamed|youtubers?|creators?|content creators?|twitch|subs|subscribers?|followers?|"
-                r"viewers?|ninja|kai cenat|ishowspeed|pokimane|xqc|asmongold|sypherpk|shroud|tfue|banned from twitch|"
-                r"hasan|dr disrespect|mrbeast|pewdiepie|markiplier|jacksepticeye|carryminati)\b",
-    "achievement": r"\b(world first|world-first|record|records|record-breaking|breaks?|broke|broken|milestone|beat|beats|beaten|"
-                   r"defeats?|upset|champions?|championship|wins?|won|victory|finals?|grand final|tournament|speedrun|"
-                   r"speedrunners?|first ever|first-ever|sold|million|billion|achievement|trophy|worlds)\b",
-    "whats_new": r"\b(patch|patch notes|update|updates|hotfix|season|new mode|release|released|launch|launches|launched|"
-                 r"out now|dlc|expansion|tips?|trick|hidden|secret|easter egg|mechanic|buff|nerf|changes?|added|adds)\b",
+    "freebie": r"\b(free(?![ -](?:update|roam|to[ -]play))|giveaways?|giving away|claim|twitch drops?|prime gaming|freebies?|"
+               r"free-to-keep|100% off|limited[- ]time rewards?)\b",
+    "glitch": r"\b(glitch(?:es|ed)?|bugs?(?![ -]fix)|exploits?|ragdoll|(?:funny|weird|broken) physics|physics (?:bug|fail))\b",
+    "tech": r"\b(gpus?|graphics cards?|geforce|rtx|radeon|nvidia|amd|intel|cpus?|dlss|fsr|xess|handhelds?|steam deck|rog ally|"
+            r"legion go|ray tracing|frame generation|upscaling|ai|artificial intelligence|benchmarks?|drivers?|hardware)\b",
+    "creator": r"\b(streamers?|youtubers?|content creators?|creators?|subscribers?|followers?|viewers?|kai cenat|ishowspeed|"
+               r"pokimane|xqc|asmongold|shroud|hasan|dr disrespect|mrbeast|pewdiepie|markiplier|jacksepticeye|carryminati|"
+               r"esports?|rosters?|tournament|champions?|championship|grand finals?|upset|signs with|benched)\b",
+    "flagship": r"\b(gta|grand theft auto|rockstar|zelda|mario|pok[eé]mon|call of duty|fortnite|minecraft|elden ring|"
+                r"elder scrolls|witcher|halo|god of war|cyberpunk|red dead|resident evil|final fantasy|easter eggs?)\b",
+    "update": r"\b(trailers?|release date|announce[sd]?|announcement|reveal(?:s|ed)?|patch|patch notes|updates?|hotfix|season|"
+              r"dlc|expansion|delayed|release[sd]?|launch(?:es|ed)?|out now|shut(?:s|ting)? ?down|shutdown|servers?)\b",
 }
 COMPILED = {k: re.compile(v, re.I) for k, v in PATTERNS.items()}
-ORDER = ("giveaway", "streamer", "achievement", "whats_new")
+ORDER = ("freebie", "glitch", "tech", "creator", "flagship", "update")
 
 
 def classify(text: str) -> str | None:
@@ -39,8 +48,17 @@ def classify(text: str) -> str | None:
     return None
 
 
+def badge_label(bucket: str, kind: str = "news", subject: str = "") -> str:
+    """The words on the yellow pill. `subject` is the story's main game (or its headline when no game is named)."""
+    if bucket == "flagship" and not GTA.search(subject or ""):
+        return OTHER_FLAGSHIP_LABEL
+    if bucket in LABELS:
+        return LABELS[bucket]
+    return LABELS["freebie"] if kind == "free_offer" else "BREAKING NEWS"
+
+
 def balance(stories: list, limit: int, text_of=lambda s: f"{s.title} {s.summary}") -> list:
-    """At most `limit` stories, newest first within each bucket, taken round-robin from the four buckets and the
+    """At most `limit` stories, newest first within each bucket, taken round-robin from the six buckets and the
     unclassified rest, so no bucket (and no prolific outlet) can crowd the others out. Input is newest first."""
     queues: dict[str, list] = {b: [] for b in (*ORDER, "other")}
     for s in stories:

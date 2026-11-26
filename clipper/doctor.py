@@ -131,7 +131,7 @@ def check_files_and_data(cfg: Config) -> None:
     for f in ("voice.md", "CLAUDE.md"):
         p = CONFIG_FILE.parent / f
         record(OK if p.is_file() else FAIL, f, "present" if p.is_file() else "missing")
-    record(OK, "streams / feeds", f"{len(cfg.streams)} streams, {len(cfg.feeds)} RSS feeds")
+    record(OK, "streams", f"{len(cfg.streams)} live streams")
     if cfg.raw.get("general", {}).get("autopost", False):
         record(FAIL, "autopost", "must be false (Zero-Ban Policy)")
     else:

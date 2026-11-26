@@ -5,7 +5,7 @@ screenshots from imagesearch.py) with a clean cut every 2.5-4.5 seconds, each un
 a light scrim (only behind the text). There is never a gradient, text slide or generated placeholder behind the Short: a picture that cannot be
 decoded is dropped, and with none left the render fails (the story is skipped). Under the voiceover (-14 LUFS)
 a Creative Commons track sits at about -25 LUFS (music.py) and the final mix is normalized to -14 LUFS. On top: the
-hook, a kicker ("BREAKING NEWS" / "FREE GAME OFFER"), the story headline, the word-by-word 2-3 word pop captions and the source
+hook, a yellow category pill ("GTA 6" / "FREE GAME" / "WILD BUG" ...), the story headline, the word-by-word 2-3 word pop captions and the source
 outlet. It goes through the same hardware-encoder / below-normal-priority / one-render-at-a-time path as live
 clips (render.py).
 Layout on 1080x1920: hook banner y~150, kicker ~600, headline ~660-900, captions y=1180, source ~1330,
@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from .buckets import LABELS as BUCKET_KICKERS
+from .buckets import badge_label
 from .config import Config
 from .hookscore import words_of
 from .profanity import mask
@@ -45,8 +45,8 @@ def build_news_ass(info: dict, words: list, dur: float) -> str:
     hook = _ass_text(mask(info["hook"]).upper())
     n = len(words_of(hook))
     hook_size = 118 if n <= 5 else 104 if n <= 8 else 90
-    kicker = {"free_offer": "FREE GAME OFFER", "trend": "TRENDING NOW"}.get(info.get("kind")) \
-        or BUCKET_KICKERS.get(info.get("bucket"), "BREAKING NEWS")
+    subject = (info.get("subjects") or [info.get("headline") or info["hook"]])[0]
+    kicker = badge_label(info.get("bucket", ""), info.get("kind", "news"), subject)
     source = _ass_text(mask(f"Source: {info['outlet']}"))
     total = dur + TAIL_SECONDS
     header = f"""[Script Info]

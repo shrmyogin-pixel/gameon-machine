@@ -101,8 +101,8 @@ voice = "en-US-AndrewNeural"       # edge-tts voice: neutral and natural (fallba
 rate = "+0%"                       # natural pace; the renderer nudges it only if the voiceover misses 30-40 s
 pitch = "+0Hz"
 groq_model = "whisper-large-v3-turbo"   # word timestamps (GROQ_API_KEY in .env)
-max_candidates = 40                # headlines shown to Claude, balanced across the four buckets below (newest first within each)
-bucket_max = 2                     # at most this many Shorts of one bucket per run: streamer / giveaway / achievement / whats_new
+max_candidates = 40                # headlines shown to Claude, balanced across the six buckets (newest first within each)
+bucket_max = 2                     # at most this many Shorts of one bucket per run: flagship / freebie / update / glitch / creator / tech
 auto_run = false                   # no automatic news: run news.bat (python -m clipper news) by hand each night
 run_times = []                     # unused: there is no clock scheduler any more
 
@@ -114,7 +114,7 @@ enabled = true
 per_run = 1                        # trend Shorts made at the end of each news run
 min_views = 20000                  # ignore videos below this many views
 giveaways = true                   # also look at live free-game giveaways (GamerPower)
-queries = ["gaming easter egg shorts", "video game secret shorts", "gaming news shorts", "free steam games shorts", "patch notes surprise gaming shorts", "gaming facts shorts"]
+queries = ["gaming easter egg shorts", "video game secret shorts", "gaming news shorts", "free steam games shorts", "patch notes surprise gaming shorts", "gaming facts shorts", "gta 6 secrets shorts", "funny video game glitch shorts"]
 
 # ---- `python -m clipper clean`: delete old clip folders + rows (exports are never touched) ----
 [clean]
@@ -306,3 +306,28 @@ url = "https://insider-gaming.com/feed/"
 [[news.feeds]]
 name = "Destructoid"
 url = "https://www.destructoid.com/feed/"
+
+# ---- Flagship (GTA), gaming tech and handheld coverage ----
+[[news.feeds]]
+name = "Rockstar Intel (GTA)"
+url = "https://rockstarintel.com/feed/"
+
+[[news.feeds]]
+name = "GTA BOOM"
+url = "https://www.gtaboom.com/feed/"
+
+[[news.feeds]]
+name = "Digital Foundry"
+url = "https://www.digitalfoundry.net/feed"
+
+[[news.feeds]]
+name = "Tom's Hardware Gaming"
+url = "https://www.tomshardware.com/feeds/tag/gaming"
+
+[[news.feeds]]
+name = "Wccftech Games"
+url = "https://wccftech.com/topic/games/feed/"
+
+[[news.feeds]]
+name = "Steam Deck HQ"
+url = "https://www.steamdeckhq.com/feed/"
