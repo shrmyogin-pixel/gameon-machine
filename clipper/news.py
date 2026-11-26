@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import db, gta
+from . import creators, db, gta
 from .config import PROJECT_ROOT, Config, get_env_key
 from .buckets import BUCKETS, classify, enforce_mix
 from .hookscore import HookScore, banned_in, closer_banned, names_subject, opener_of, rank_hooks, restates_hook, words_of
@@ -56,6 +56,9 @@ HARD_SKIP = re.compile(
     r"pirated (?:copy|copies|download|games?)|cracked (?:apk|copy|download|version)|mod apk|apk mod|"
     r"mod menu|aimbots?|wallhacks?|hack tool|cheat (?:download|tool|software)s?|"
     r"free (?:v-?bucks|robux)|(?:v-?bucks|robux|money|gems?) generator|no (?:human )?verification|crypto airdrop)\b", re.I)
+# news --topic <name>: which stories qualify, what Claude is told, and which words do not tell two stories apart
+MODES = {"gta": (gta.is_gta_story, gta.PROMPT_NOTE, gta.COMMON, "GTA"),
+         "creators": (creators.is_story, creators.PROMPT_NOTE, creators.COMMON, "creator")}
 KINDS = {"news": "BREAKING NEWS", "free_offer": "FREE GAME OFFER", "trend": "TRENDING NOW"}
 
 
@@ -159,7 +162,7 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
         if any(k in seen_keys for k in story_keys(s.link, s.title)):
             log.info("news: skipped (story already made, rejected or uploaded): %s", s.title[:80])
             continue
-        if cfg.news.get("only") == "gta" and not gta.is_gta_story(s.title, s.summary):
+        if cfg.news.get("only") and not MODES[cfg.news["only"]][0](s.title, s.summary):
             continue
         if HARD_SKIP.search(f"{s.title} {s.summary} {s.link}"):
             log.info("news: skipped (gambling, piracy, cheat or scam): %s", s.title[:80])
@@ -169,7 +172,7 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
         unique.append(s)
     from .buckets import balance
     from .topics import cap_hot_topics                            # before balancing, so a flooding topic wastes no slots
-    if not cfg.news.get("only"):                                  # a GTA-only run is all one topic: nothing to cap
+    if not cfg.news.get("only"):                                  # a one-theme run (GTA, creators): nothing to cap
         unique = cap_hot_topics(unique)
     unique = balance(unique, int(cfg.news["max_candidates"]))     # a mix of the six buckets
     for i, s in enumerate(unique, start=1):
@@ -283,7 +286,8 @@ def build_prompt(cfg: Config, stories: list[Story], n: int, now: datetime | None
     for key, val in {"hours": cfg.news["hours"], "n": n, "bmin": lo - 4, "bmax": hi - 12}.items():
         text = text.replace("{" + key + "}", str(val))
     text = text.replace("\0voice\0", voice).replace("\0rows\0", rows).replace("\0covered\0", covered)
-    return text + gta.PROMPT_NOTE if cfg.news.get("only") == "gta" else text
+    only = cfg.news.get("only")
+    return text + MODES[only][1] if only else text
 
 
 def _text(d: dict, key: str, lo: int, hi: int, what: str | None = None) -> str:
@@ -449,16 +453,19 @@ def pick_stories(cfg: Config, stories: list[Story], n: int, work_dir: Path, tren
                 log.info("news: Claude found no story worth making")
                 return []                    # a clean "nothing today", not a broken reply
             picks = validate_reply(reply, stories, cfg)
-            only_gta = cfg.news.get("only") == "gta"
-            if only_gta:
-                kept, dropped = gta.enforce_angles(picks, _covered_headlines(cfg, now))
+            only = cfg.news.get("only")
+            if only == "creators":
+                for p in picks:
+                    p.bucket = "creator"                 # the pill reads CREATOR NEWS whatever the game
+            if only:
+                kept, dropped = gta.enforce_angles(picks, _covered_headlines(cfg, now), MODES[only][2])
             else:
                 kept, dropped = topics.enforce(picks, [c for c in covered if c], blocked)
             for why in dropped:
                 log.info("news: dropped (topic diversity): %s", why)
             if not kept:
                 raise NewsError("every pick repeated a topic: " + "; ".join(dropped))
-            kept, over = enforce_mix(kept, len(kept) if only_gta else int(cfg.news.get("bucket_max", 2)))
+            kept, over = enforce_mix(kept, len(kept) if only else int(cfg.news.get("bucket_max", 2)))
             for why in over:
                 log.info("news: dropped (bucket mix): %s", why)
             return kept
@@ -776,11 +783,12 @@ def run_news(cfg: Config, hours: float | None = None, count: int | None = None, 
     """The RSS news Shorts (see _run_stories), then - when [trends] is enabled - the trend-discovery Shorts, which are
     paraphrased from scratch and may not repeat a game already picked in this run. Never raises.
 
-    only="gta": GTA stories from the RSS feeds only (see gta.py), looking back [news] gta_hours, without trend Shorts."""
+    only="gta" / "creators": that theme's stories from the RSS feeds only (see MODES), looking back [news]
+    gta_hours / creators_hours, without trend Shorts."""
     if only:
         before = dict(cfg.raw.get("news", {}))
         cfg.raw["news"] = {**before, "only": only}
-        hours = hours if hours is not None else float(cfg.news.get("gta_hours", 48))
+        hours = hours if hours is not None else float(cfg.news.get(f"{only}_hours", 48))
         trends = False
         try:
             return _run_stories(cfg, hours, count, dry_run, quota)

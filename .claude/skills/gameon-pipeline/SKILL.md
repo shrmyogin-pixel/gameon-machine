@@ -46,6 +46,12 @@ These are fixed. Change one only when the user explicitly asks for that change; 
   `[news] gta_hours`, no trend Shorts. Same filters, look, queue and review as `news.bat`, which is unchanged.
 - Several GTA Shorts are allowed when each covers a different angle.
 
+## Creators-only mode
+- `creators.bat` or `python -m clipper news --creators`: creator, streamer and esports headlines about any game
+  (`creators.py`), looking back `[news] creators_hours`, no trend Shorts, every pill `CREATOR NEWS`.
+- Never real people's arrests, allegations, abuse, deaths or private life. One Short per creator or event.
+- `news.bat`, `export.bat` and the GTA-only filter are unaffected.
+
 ## Credit and attribution
 - Every export's description ends with a `Sources & Credits:` line naming the source and its link. No line, no export.
 - Music is CC-BY: its attribution line goes into the description automatically and survives manual edits at export.

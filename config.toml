@@ -87,6 +87,7 @@ corner = "left"                    # "left" or "right"; bottom, above the y=1450
 [news]
 hours = 12                         # only stories newer than this
 gta_hours = 48                     # gta.bat / news --only-gta look back further: there are fewer GTA stories
+creators_hours = 36                # creators.bat / news --creators
 stories = 4                        # news Shorts per run (repeat stories are skipped: same URL, same headline, same event)
 images_min = 8                     # fewer unique real pictures than this -> topped up with topic-matched game screenshots
 images_max = 10                    # 8-10 real pictures per Short, cut every 2.5-4.5 s so none repeats (never generated cards or text slides)

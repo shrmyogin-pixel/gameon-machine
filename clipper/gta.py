@@ -36,25 +36,25 @@ def is_gta_story(title: str, summary: str = "") -> bool:
     return bool(GTA.search(title or "")) and not LOOKALIKE.search(title or "") and not BAIT.search(text)
 
 
-def _angle(title: str) -> set[str]:
+def _angle(title: str, common: set[str]) -> set[str]:
     """The words that say WHICH story this is (plural "s" removed so "cars" matches "car")."""
     words = re.findall(r"[a-z][a-z'-]{2,}", (title or "").lower())
-    return {w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words if w not in COMMON}
+    return {w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words if w not in common}
 
 
-def same_angle(a: str, b: str) -> bool:
+def same_angle(a: str, b: str, common: set[str] = COMMON) -> bool:
     """Two headlines tell the same story: the shorter one's distinctive words are all in the other, or at least two of
     them (and half) are shared."""
-    x, y = _angle(a), _angle(b)
+    x, y = _angle(a, common), _angle(b, common)
     shared, smaller = len(x & y), min(len(x), len(y))
     return shared > 0 and (shared == smaller or (shared >= 2 and shared >= smaller / 2))
 
 
-def enforce_angles(picks: list, covered_headlines: list[str]) -> tuple[list, list[str]]:
+def enforce_angles(picks: list, covered_headlines: list[str], common: set[str] = COMMON) -> tuple[list, list[str]]:
     """Best first: drop a pick that repeats an angle already picked or already made. -> (kept, [why dropped])."""
     kept, dropped, seen = [], [], list(covered_headlines)
     for p in sorted(picks, key=lambda p: -p.score):
-        if any(same_angle(p.story.title, t) for t in seen):
+        if any(same_angle(p.story.title, t, common) for t in seen):
             dropped.append(f"'{p.story.title[:50]}' covers an angle already made")
             continue
         seen.append(p.story.title)

@@ -154,6 +154,54 @@ class GtaOnlyTests(unittest.TestCase):
         self.assertNotIn("gta", (PROJECT_ROOT / "news.bat").read_text(encoding="utf-8").lower())
 
 
+class CreatorsOnlyTests(unittest.TestCase):
+    def test_creator_news_qualifies_and_lookalikes_do_not(self):
+        from clipper import creators
+        for good in ("Kai Cenat finishes his month-long subathon", "Streamer completes Elden Ring no-hit run",
+                     "Fnatic announce new Valorant roster", "Twitch viewership record falls to a Minecraft event",
+                     "T1 wins the League of Legends world championship", "xQc reveals his own game"):
+            self.assertTrue(creators.is_story(good), good)
+        for bad in ("Marathon gets a release date", "Tekken adds to its character roster", "The creator of Final Fantasy speaks",
+                    "Streamer arrested after police raid", "YouTuber accused in new allegations", "Zelda patch out now",
+                    "Streamer starts slots stream"):
+            self.assertFalse(creators.is_story(bad), bad)
+
+    def test_one_short_per_creator_event_and_every_pill_is_creator_news(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from clipper import editor
+        from tests.test_news import reply, story
+        cfg = load_config()
+        cfg.raw = {**cfg.raw, "news": {**cfg.raw["news"], "stories": 3, "only": "creators"}}
+        stories = [story(1), story(2), story(3)]
+        stories[0].title = "Kai Cenat breaks the Twitch subscriber record"
+        stories[1].title = "Kai Cenat sets new subscriber record on Twitch"
+        stories[2].title = "Fnatic announce new Valorant roster"
+        text = json.dumps({"stories": [{**reply(i), "bucket": "flagship"} for i in (1, 2, 3)]})
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            cfg.database = Path(tmp) / "c.sqlite"
+            with mock.patch.object(editor, "call_claude", return_value=text):
+                picks = news.pick_stories(cfg, stories, 3, Path(tmp))
+            self.assertIn("CREATORS-ONLY RUN", news.build_prompt(cfg, stories, 3))
+        self.assertEqual([p.story.id for p in picks], [1, 3])
+        self.assertEqual({badge_label(p.bucket) for p in picks}, {"CREATOR NEWS"})
+
+    def test_the_command_reaches_the_creators_mode_and_other_launchers_are_unchanged(self):
+        from unittest import mock
+        from clipper import cli
+        seen = []
+        result = news.NewsResult()
+        with mock.patch.object(news, "run_news", lambda *a, **k: seen.append(k.get("only")) or result):
+            for args in (["news", "--creators"], ["news", "--topic", "creators"], ["news", "--only-gta"], ["news"]):
+                cli.main(args)
+        self.assertEqual(seen, ["creators", "creators", "gta", None])
+        self.assertIn("-m clipper news --creators %*", (PROJECT_ROOT / "creators.bat").read_text(encoding="utf-8"))
+        for name in ("news.bat", "export.bat"):
+            self.assertNotIn("creators", (PROJECT_ROOT / name).read_text(encoding="utf-8").lower())
+
+
 class RenderSlotTests(unittest.TestCase):
     def test_a_second_process_cannot_take_the_render_slot(self):
         import subprocess
