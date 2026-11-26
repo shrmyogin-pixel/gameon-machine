@@ -29,7 +29,8 @@ TAIL_SECONDS = 0.3             # picture stays up a moment after the voice ends
 FPS = 30
 PICTURE_TIMEOUT = 600          # a picture render that takes longer than this is stuck
 KB_ZOOM = 0.08                 # Ken Burns: zoom grows from 1.00x to 1.08x within a cut (subtle, no shaky crops)
-CYAN, MAGENTA, YELLOW, WHITE, NAVY = "&H00FFF000&", "&H00D62BFF&", "&H0000F2FF&", "&H00FFFFFF&", "&H00300A14&"   # Tokyo Neon (BGR)
+CYAN, MAGENTA, WHITE, NAVY = "&H00FFF000&", "&H00D62BFF&", "&H00FFFFFF&", "&H00300A14&"   # Tokyo Neon (BGR)
+BADGE_YELLOW, BADGE_TEXT = "&H0000D4FF&", "&H00141414&"   # category badge: plain solid yellow, near-black text (BGR)
 KICKER_Y, NEWS_HOOK_Y = 150, 235      # kicker chip then the big hook, both below the Shorts top bar
 CUT_SECONDS = 3.4              # target length of a cut
 MIN_CUT, MAX_CUT = 2.5, 4.5    # every cut lasts between these
@@ -60,7 +61,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Hook,{f['Hook']},{hook_size},{WHITE},&H000000FF,{CYAN},{MAGENTA},0,0,0,0,100,100,2,0,1,8,6,8,90,90,0,1
 Style: Glow,{f['Hook']},{hook_size},{CYAN},&H000000FF,{MAGENTA},&H00000000,0,0,0,0,100,100,2,0,1,16,0,8,90,90,0,1
 Style: Cap,{f['Cap']},{f['cap_size']},{WHITE},&H000000FF,{NAVY},{MAGENTA},0,0,0,0,100,100,1,0,1,9,6,5,90,90,0,1
-Style: Kicker,{f['head']},46,{NAVY},&H000000FF,{YELLOW},{MAGENTA},0,0,0,0,100,100,5,0,1,12,4,8,90,90,0,1
+Style: Kicker,{f['head']},46,{BADGE_TEXT},&H000000FF,{BADGE_YELLOW},{BADGE_YELLOW},0,0,0,0,100,100,3,0,3,14,0,8,90,90,0,1
 Style: Src,{f['head']},34,&H00F0F0F0,&H000000FF,{NAVY},&H96000000,0,0,0,0,100,100,0,0,1,5,3,8,90,90,0,1
 
 [Events]

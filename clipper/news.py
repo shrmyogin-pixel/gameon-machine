@@ -174,7 +174,7 @@ Use ONLY facts found in the headline and summary. Never invent dates, prices, na
 
 FOR EACH STORY write:
 - script_body: the spoken script AFTER the hook, {bmin}-{bmax} words, written like a real gaming creator talking to a friend: concrete details FIRST (price, date, platform, number, name), punchy sentences of 8-12 words, one fact each, contractions allowed, no robotic filler openers or closers. Then one line on why it matters, then ONE closing line that follows the CLOSING rules below. NEVER repeat the headline or the hook: do not reuse 5 or more words in a row from the story's headline, say it in your own words. Plain text only (no emoji, no hashtags, no stage directions, no markdown). No profanity.
-- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must carry urgency, a curiosity gap or the news itself in its first words (free, today, now, leak, confirmed, delayed, "stop scrolling", "nobody expected" ...) and name the game, platform, store or creator inside its FIRST 6 WORDS (put a creator in subjects too) - EXCEPT that up to 2 of the 5 may be pure curiosity-gap hooks that withhold the name ("One streamer just broke a record nobody thought possible."); if you use one, the FIRST sentence of script_body MUST name the game / creator / store. Use 5 different angles, and at least 3 of the 5 must open on a curiosity gap, a bold claim or a stake for the viewer ("Stop scrolling if you play ...", "Nobody expected ... to ...", "You have 48 hours to ...", a question) instead of a plain "X just did Y" headline. No banned filler.
+- hooks: exactly 5 different hooks, each 5-12 words (never more than 12). Each must carry urgency, a curiosity gap or the news itself in its first words (free, today, now, leak, confirmed, delayed, "stop scrolling", "nobody expected" ...) and name the game, platform, store or creator inside its FIRST 6 WORDS (put a creator in subjects too) - EXCEPT that up to 2 of the 5 may be pure curiosity-gap hooks that withhold the name ("One streamer just broke a record nobody thought possible."); if you use one, the FIRST sentence of script_body MUST name the game / creator / store. Use 5 different angles, and at least 3 of the 5 must open on a curiosity gap, a bold claim or a stake for the viewer ("Nobody expected ... to ...", "You have 48 hours to ...", "Your ... could disappear", a question) instead of a plain "X just did Y" headline. No banned filler.
 - subjects: the game / platform / store names exactly as they appear in your hooks (1-4 short strings). Put the MAIN GAME'S proper title first (e.g. "Alan Wake 2"): it is used to search for matching screenshots.
 - headline: the on-screen headline card, max 70 characters, no emoji, no profanity.
 - title: video title, 25-60 characters, game or platform within its first 4 words, no emoji.
@@ -185,8 +185,8 @@ FOR EACH STORY write:
 - reason: one sentence on why you chose it.
 
 HOOK AND CLOSING RULES (strict, they decide whether people stay):
-- OPENING (spoken in the first 1-2.5 seconds): NEVER a greeting ("hey gamers", "welcome back"), never filler ("breaking news today") and never a dry headline read. Open on an immediate curiosity gap, a bold claim, or what is at stake for the viewer, then lead straight into the story. Examples of the energy: "Stop scrolling if you play Fortnite.", "One streamer just broke a record nobody thought was possible.", "You have 48 hours to claim this free game before it's gone."
-- The script_body must CONTINUE from the hook with new facts. It must never restate the hook in other words.
+- OPENING (spoken in the first 1-2.5 seconds): NEVER a greeting ("hey gamers", "welcome back"), never filler ("breaking news today") and never a dry headline read. Open on a sharp curiosity gap (name what the viewer does not know yet) or concrete stakes (what they get, lose or miss, and by when), then lead straight into the story. Examples of the energy: "Your Exoprimal progress has an expiry date.", "One streamer just broke a record nobody thought was possible.", "You have 48 hours to claim this free game before it's gone." Weak, do not write: "X is shutting down in 2027." (plain headline), "Stop scrolling if you play X." (nothing at stake). Only claim stakes the facts support.
+- The FIRST sentence of script_body must pay off or deepen the hook with a NEW fact. It must never restate the hook, not even with different wording or the same date, number or verb.
 - CLOSING (the last 2-3 seconds, the last sentence of script_body, at most 12 words): NEVER "thanks for watching", "follow for more", "see you next time", "watch this space" or any slow generic outro. End on a punchy final twist, a debate question the viewer wants to answer, or a loop line that flows naturally back into the opening hook. It must make sense if the video starts over.
 
 Reply with STRICT JSON only (no prose, no code fences):
@@ -218,8 +218,8 @@ FOR EACH TOPIC write:
 - reason: one sentence on why you chose it.
 
 HOOK AND CLOSING RULES (strict, they decide whether people stay):
-- OPENING (spoken in the first 1-2.5 seconds): NEVER a greeting ("hey gamers", "welcome back"), never filler ("breaking news today") and never a dry headline read. Open on an immediate curiosity gap, a bold claim, or what is at stake for the viewer, then lead straight into the story. Examples of the energy: "Stop scrolling if you play Fortnite.", "One streamer just broke a record nobody thought was possible.", "You have 48 hours to claim this free game before it's gone."
-- The script_body must CONTINUE from the hook with new facts. It must never restate the hook in other words.
+- OPENING (spoken in the first 1-2.5 seconds): NEVER a greeting ("hey gamers", "welcome back"), never filler ("breaking news today") and never a dry headline read. Open on a sharp curiosity gap (name what the viewer does not know yet) or concrete stakes (what they get, lose or miss, and by when), then lead straight into the story. Examples of the energy: "Your Exoprimal progress has an expiry date.", "One streamer just broke a record nobody thought was possible.", "You have 48 hours to claim this free game before it's gone." Weak, do not write: "X is shutting down in 2027." (plain headline), "Stop scrolling if you play X." (nothing at stake). Only claim stakes the facts support.
+- The FIRST sentence of script_body must pay off or deepen the hook with a NEW fact. It must never restate the hook, not even with different wording or the same date, number or verb.
 - CLOSING (the last 2-3 seconds, the last sentence of script_body, at most 12 words): NEVER "thanks for watching", "follow for more", "see you next time", "watch this space" or any slow generic outro. End on a punchy final twist, a debate question the viewer wants to answer, or a loop line that flows naturally back into the opening hook. It must make sense if the video starts over.
 
 Reply with STRICT JSON only (no prose, no code fences):
@@ -354,7 +354,11 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                 raise NewsError("the closing line must be short and punchy (at most 12 words)")
             ranked = rank_hooks(hooks_raw, subjects)
             body_words = len(body.split())
-            chosen = next((h for h in ranked if h.valid and lo <= h.words + body_words <= hi), None)
+            fitting = [h for h in ranked if h.valid and lo <= h.words + body_words <= hi]
+            # best hook that sentence 2 does not simply repeat; if all are repeated, the check below rejects the reply
+            chosen = next((h for h in fitting if not restates_hook(h.hook, body, subjects=subjects)
+                           and (names_subject(h.hook, subjects) or names_subject(body.split(".")[0], subjects))),
+                          fitting[0] if fitting else None)
             if chosen is None:
                 if not any(h.valid for h in ranked):
                     raise NewsError("no valid hook: " + "; ".join(f"'{h.hook[:30]}' {', '.join(h.reasons)}" for h in ranked))
@@ -362,7 +366,7 @@ def validate_reply(reply: str, stories: list[Story], cfg: Config) -> list[Pick]:
                                 f"hooks have {min(h.words for h in ranked)}-{max(h.words for h in ranked)}")
             if not names_subject(chosen.hook, subjects) and not names_subject(body.split(".")[0], subjects):
                 raise NewsError("the hook withholds the game / creator name, so the first sentence of script_body must name it")
-            if restates_hook(chosen.hook, body):
+            if restates_hook(chosen.hook, body, subjects=subjects):
                 raise NewsError("script_body starts by restating the hook; continue with NEW facts instead")
             pick = Pick(
                 story=by_id[sid], kind=kind, score=float(score), subjects=subjects, hooks=ranked, hook=chosen,

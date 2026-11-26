@@ -11,6 +11,8 @@ score_hook() gives 0-10:
 The four parts above are scaled to 7 points and the curiosity bonus adds up to 3, so a plain "X just did Y" headline hook
 tops out at 7 while a hook with a gap or a stake can reach 10.
 A hook of more than 12 words, or one containing banned filler, is invalid and scores 0.
+Two penalties on the total: a bare stock opener ("Stop scrolling if you play X" with nothing at stake) loses 2, and a plain
+headline read ("X is / just / gets ..." with no gap or stake) loses 1.
 
 Pure functions, no I/O.
 """
@@ -74,6 +76,16 @@ CURIOSITY = (r"stop scrolling", r"stop what", r"nobody", r"no one", r"never", r"
              r"nobody (?:saw|expected|thought)", r"can'?t believe", r"wait", r"impossible", r"gone")
 
 
+# concrete stakes: what the viewer stands to lose
+CURIOSITY += (r"your (?:clock|time|save|saves|library|progress|money|account)", r"ticking", r"expiry", r"last chance",
+              r"for good", r"forever", r"\blos(?:e|es|ing)\b", r"disappear", r"vanish")
+
+# "Stop scrolling if you play X" and nothing else: no consequence, no gap
+STOCK_OPENER = re.compile(r"^stop scrolling[,:]? if you (?:still )?(?:play|own|have|love) [^,:;?]+?[.!]?$", re.I)
+HEADLINE_VERBS = {"is", "are", "just", "gets", "adds", "finally", "officially", "confirms", "announces", "reveals", "can",
+                  "has", "will", "launches", "drops"}
+
+
 def curiosity_cues(hook: str) -> list[str]:
     low = re.sub(r"[’‘]", "'", hook.lower())
     return [c for c in CURIOSITY if re.search(c, low)]
@@ -94,13 +106,41 @@ def closer_banned(script: str) -> list[str]:
     return [b for b in BANNED_CLOSERS if re.search(r"(?<![a-z])" + re.escape(b) + r"(?![a-z])", low)]
 
 
-def restates_hook(hook: str, body: str, threshold: float = 0.6) -> bool:
-    """True when the script's first sentence just says the hook again (most of the hook's content words repeat)."""
+# words that frame a hook without carrying its fact
+FRAMING = {"stop", "scrolling", "play", "have", "your", "this", "that", "these", "just", "with", "from", "what", "will",
+           "about", "still", "love", "nobody", "expected", "there", "they", "them", "when", "into", "game", "games"}
+
+
+def _stem(word: str) -> str:
+    """Crude stem so "shutting", "shuts" and "shutdown" can be matched."""
+    w = re.sub(r"['’]s$", "", word.lower())
+    for suffix in ("ing", "ed", "es", "s"):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            w = w[:-len(suffix)]
+            break
+    return w[:-1] if len(w) > 3 and w[-1] == w[-2] and w[-1] not in "aeiouls0123456789" else w
+
+
+def _same_fact(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    return min(len(a), len(b)) >= 4 and a.isalpha() and b.isalpha() and (a.startswith(b) or b.startswith(a))
+
+
+def restates_hook(hook: str, body: str, threshold: float = 0.6, subjects: list[str] | tuple = ()) -> bool:
+    """True when the script's first sentence just says the hook again: most of the hook's content words repeat, or at
+    least two of its facts (ignoring the subject's name and framing words) come back in another form."""
     def content(text: str) -> set[str]:
         return {w.lower() for w in words_of(text) if len(w) > 3}
     first = re.split(r"(?<=[.!?])\s+", body.strip(), maxsplit=1)[0]
     h = content(hook)
-    return bool(h) and len(h & content(first)) / len(h) >= threshold
+    if h and len(h & content(first)) / len(h) >= threshold:
+        return True
+    names = {_stem(w) for s in subjects for w in words_of(s)}
+    facts = {_stem(w) for w in h if w not in FRAMING} - names
+    said = {_stem(w) for w in content(first)}
+    repeated = [f for f in facts if any(_same_fact(f, s) for s in said)]
+    return len(repeated) >= 2 and len(repeated) / len(facts) >= threshold
 
 
 def _has_phrase(tokens: list[str], phrase: str) -> bool:
@@ -152,14 +192,32 @@ def score_hook(hook: str, subjects: list[str] | tuple = ()) -> HookScore:
     res.parts["curiosity"] = 3.0 if len(cues) >= 2 else 1.5 if cues else 0.0
     res.reasons.append("curiosity gap / stake" if cues else "no curiosity gap or stake (plain headline)")
     base = sum(v for k, v in res.parts.items() if k != "curiosity")
-    res.total = round(min(base * 0.7 + res.parts["curiosity"], 10.0), 2)
+    total = min(base * 0.7 + res.parts["curiosity"], 10.0)
+    if STOCK_OPENER.match(hook.strip()):
+        res.parts["stock_opener"] = -2.0
+        res.reasons.append("bare stock opener: say what is at stake")
+    elif not cues and _reads_as_headline(toks, names):
+        res.parts["plain_headline"] = -1.0
+        res.reasons.append("reads like a plain headline")
+    total += res.parts.get("stock_opener", 0.0) + res.parts.get("plain_headline", 0.0)
+    res.total = round(max(total, 0.0), 2)
     return res
 
 
+def _reads_as_headline(toks: list[str], names: list[str]) -> bool:
+    """The hook starts with the subject's name and goes straight into a headline verb."""
+    low = [t.lower() for t in toks]
+    for name in names:
+        parts = name.lower().split()
+        if low[:len(parts)] == parts and len(low) > len(parts) and low[len(parts)] in HEADLINE_VERBS:
+            return True
+    return False
+
+
 def rank_hooks(hooks: list[str], subjects: list[str] | tuple = ()) -> list[HookScore]:
-    """Every hook scored, best first (valid ones before invalid; ties keep the original order)."""
+    """Every hook scored, best first (valid before invalid; on a tie the stronger curiosity gap, then original order)."""
     scored = [score_hook(h, subjects) for h in hooks]
-    return sorted(scored, key=lambda s: (not s.valid, -s.total))
+    return sorted(scored, key=lambda s: (not s.valid, -s.total, -s.parts.get("curiosity", 0.0)))
 
 
 def best_hook(hooks: list[str], subjects: list[str] | tuple = ()) -> HookScore | None:

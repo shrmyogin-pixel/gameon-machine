@@ -12,12 +12,14 @@
 - Open on an **immediate curiosity gap, a bold claim, or what is at stake for the viewer**, then lead straight into the story.
 - Still name the **game, platform, creator or offer** in the hook, ideally inside its first 6 words.
 - NEVER start with a greeting ("Hey gamers", "Welcome back"), filler ("Breaking news today") or a dry headline read.
-  - Good: "Stop scrolling if you play Fortnite."
+  - Good: "Your Exoprimal progress has an expiry date."
   - Good: "One streamer just broke a record nobody thought was possible."
   - Good: "You have 48 hours to claim this free game before it's gone."
   - Good: "GTA 6 leak shows a new Vice City map."
   - Bad: "Hey guys, you will not believe this." / "Breaking news today in gaming."
-- The first sentence after the hook continues with NEW facts. Never restate the hook in other words.
+  - Weak: "Exoprimal is shutting down in 2027." (plain headline) / "Stop scrolling if you play Fortnite." (nothing at stake)
+- Only claim stakes the facts support.
+- The first sentence after the hook pays off or deepens it with a NEW fact. Never restate the hook, not even reworded or with the same date, number or verb.
 
 ## Banned filler (zero tolerance)
 Never use: "what is up guys", "hey guys", "welcome back", "you won't believe",
