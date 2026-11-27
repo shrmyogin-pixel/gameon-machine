@@ -217,6 +217,24 @@ class PictureChoiceTests(unittest.TestCase):
         got = [u.rsplit("/", 1)[1] for u in newsimage.article_images(page, "https://x.com/a")]
         self.assertEqual(got, ["GTA-6-YouTube-trailer-screenshot.jpg", "GTA-6-Animal-Hunting.jpg"])
 
+    def test_video_thumbnails_are_never_used(self):
+        from clipper import newsimage
+        for url in ("https://i.ytimg.com/vi/abc/maxresdefault.jpg?v=1", "https://img.youtube.com/vi/abc/0.jpg",
+                    "https://static-cdn.jtvnw.net/previews-ttv/live_user_x-1920x1080.jpg"):
+            self.assertTrue(newsimage.is_video_thumbnail(url), url)
+            self.assertFalse(newsimage._usable_url(url), url)
+        self.assertTrue(newsimage._usable_url("https://cdn.example.com/gta-6-screen.jpg"))
+
+    def test_betting_sites_are_never_picture_sources(self):
+        from clipper import newsimage
+        for url in ("https://www.betus.com.pa/wp-content/uploads/Screenshot_110.jpg", "https://thunderpick.io/a.jpg",
+                    "https://cdn.x.com/uploads/esports-betting-guide.jpg", "https://stake.com/banner.jpg"):
+            self.assertFalse(newsimage._usable_url(url), url)
+        self.assertFalse(newsimage._usable_url("https://cdn.x.com/a.jpg", "Presented by Thunderpick"))
+        for url in ("https://cdn.x.com/mistake.com-fix.jpg", "https://cdn.x.com/alphabet-soup.jpg", "https://cdn.x.com/lec-stage.jpg"):
+            self.assertTrue(newsimage._usable_url(url), url)
+        self.assertTrue(news.HARD_SKIP.search("Thunderpick World Championship returns"))
+
     def run_visuals(self, used_before: int, fresh_available: int):
         """collect_visuals with a fake search over pictures 0..N: -> the picture numbers the new Short got."""
         import tempfile

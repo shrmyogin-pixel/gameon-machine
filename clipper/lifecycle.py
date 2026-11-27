@@ -84,7 +84,10 @@ def record_seen(cfg: Config, clip: dict, reason: str) -> bool:
     if not story:
         return True
     url, headline = story
-    db.add_seen(cfg.database, story_keys(url, headline), url, headline or clip.get("title"), reason)
+    keys = story_keys(url, headline)
+    if clip.get("moment_kind") == "promo":
+        keys = ["p:" + k for k in keys]            # only promo runs look at these
+    db.add_seen(cfg.database, keys, url, headline or clip.get("title"), reason)
     return True
 
 

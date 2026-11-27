@@ -369,7 +369,7 @@ def count_accepted_since(db_path: Path, since_utc: str, news: bool | None = None
     sql = ("SELECT COUNT(*) AS n FROM clips WHERE created_at >= ? AND status IN "
            "('edited', 'rendered', 'approved', 'rejected', 'posted')")
     if news is True:
-        sql += " AND platform = 'news'"
+        sql += " AND platform = 'news' AND COALESCE(moment_kind, '') != 'promo'"
     elif news is False:
         sql += " AND platform != 'news'"
     with connect(db_path) as conn:
@@ -412,11 +412,12 @@ def clip_by_folder(db_path: Path, folder: str) -> dict | None:
     return row_to_dict(row) if row else None
 
 
-def recent_news_titles(db_path: Path, since_utc: str) -> list[str]:
+def recent_news_titles(db_path: Path, since_utc: str, promo: bool = False) -> list[str]:
     """Titles of news Shorts made since `since_utc` (failed ones excluded): what the channel just covered."""
     with connect(db_path) as conn:
+        extra = "" if promo else " AND COALESCE(moment_kind, '') != 'promo'"
         return [r["title"] for r in conn.execute(
-            "SELECT title FROM clips WHERE platform = 'news' AND title IS NOT NULL AND status != 'failed'"
+            "SELECT title FROM clips WHERE platform = 'news' AND title IS NOT NULL AND status != 'failed'" + extra +
             " AND created_at >= ? ORDER BY id DESC", (since_utc,))]
 
 
@@ -458,12 +459,13 @@ def recent_used_pictures(db_path: Path, since_utc: str) -> list[tuple[int, int]]
             "SELECT ahash, dhash FROM used_pictures WHERE created_at >= ?", (since_utc,))]
 
 
-def news_urls_seen(db_path: Path) -> set[str]:
+def news_urls_seen(db_path: Path, promo: bool = False) -> set[str]:
     """Article URLs that already became a news Short (so the same story is never made twice).
     A story whose Short failed is not counted, so the next run can try it again."""
     with connect(db_path) as conn:
+        extra = "" if promo else " AND COALESCE(moment_kind, '') != 'promo'"
         return {r["source_url"] for r in conn.execute(
-            "SELECT source_url FROM clips WHERE platform = 'news' AND source_url IS NOT NULL AND status != 'failed'")}
+            "SELECT source_url FROM clips WHERE platform = 'news' AND source_url IS NOT NULL AND status != 'failed'" + extra)}
 
 
 # ------------------------------------------------------------------ clean

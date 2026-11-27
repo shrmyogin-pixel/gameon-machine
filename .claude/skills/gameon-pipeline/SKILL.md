@@ -27,8 +27,11 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - Game On watermark bottom-left, above the y=1450 safe zone.
 
 ## Pictures and hooks
-- 8-10 real pictures per news Short (at least 5, else skip the story). No placeholders or generated cards.
+- 8-10 real pictures per news Short (at least 5, else skip the story, unless it has 3 or more video clips). No placeholders or generated cards.
 - Reject low-res (under 1000x560 either way up), blurry, odd-shaped and duplicate pictures (`newsimage.save_picture`).
+- Never a picture from, or naming, a betting or casino business (`newsimage.GAMBLING_SOURCE`). A sponsor logo inside
+  an ordinary photo is not detected: check pictures in review.
+- Never a thumbnail of someone else's video or stream (`newsimage.is_video_thumbnail`).
 - Never an outlet's own promo graphic (subscribe / follow / newsletter banners).
 - A Short avoids pictures that Shorts of the last 48 hours showed, reusing one only to avoid having too few.
 - Hooks: curiosity gap or concrete stake, never the headline read back, no vague "Nobody expected this" teaser,
@@ -53,6 +56,22 @@ These are fixed. Change one only when the user explicitly asks for that change; 
   (`creators.py`), looking back `[news] creators_hours`, no trend Shorts, every pill `CREATOR NEWS`.
 - Never real people's arrests, allegations, abuse, deaths or private life. One Short per creator or event.
 - `news.bat`, `export.bat` and the GTA-only filter are unaffected.
+
+## Video clips (every command)
+- `videosearch.py` gives each news Short as many clips as its length needs (at most 15): own recordings in `assets/gameplay/<game-slug>/`, then VERIFIED
+  YouTube channels through `yt-dlp` (`[news] youtube`), Steam store trailers, Wikimedia Commons.
+- Clips are 3-4 s of the liveliest moments (never the first 5 s or last 10 s), muted, reframed to 1080x1920 over a
+  blurred fill. Stills stay 2-2.5 s with a Ken Burns move. No signing in, no age-restricted or live videos.
+- Every video source is named on the `Sources & Credits:` line itself.
+- Games the Steam store marks for gore or sexual content get no Steam trailers. Check all footage in review.
+- `tech.bat` or `python -m clipper news --topic tech`: gaming tech headlines only, pill `GAMING TECH`.
+
+## Promo mode
+- `promo.bat` or `python -m clipper news --topic promo`: deals, discounts, bundles and gear spotlights, pill
+  `GAME DEAL` or `TECH PICK` (same solid yellow).
+- Isolated: promo Shorts are invisible to the other commands' repeat checks and daily quota, and never take a YouTube
+  slot automatically. A promo run does avoid stories the other commands already made.
+- No monetised links, codes or disclosures anywhere in the code or upload sheets.
 
 ## Credit and attribution
 - Every export's description ends with a `Sources & Credits:` line naming the source and its link. No line, no export.

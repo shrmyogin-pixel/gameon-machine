@@ -186,13 +186,12 @@ class CuriosityHookTests(unittest.TestCase):
 
 
 class EightToTenPicturesTests(unittest.TestCase):
-    def test_one_cut_per_picture_when_there_are_enough_pictures(self):
+    def test_every_picture_shows_before_any_returns(self):
         from clipper import news_render
         for total, n in ((36.97, 10), (36.97, 9), (36.0, 8), (30.5, 8)):
-            segs = news_render.plan_segments(total, n)
-            self.assertEqual([i for i, _ in segs], list(range(n)), (total, n))          # every picture once, none repeats
-            self.assertTrue(all(2.5 <= s <= 4.5 for _, s in segs))
-        self.assertGreater(len(news_render.plan_segments(36.97, 4)), 4)                   # too few pictures: cycles as before
+            order = [i for i, s in news_render.plan_segments(total, n)]
+            self.assertEqual(order[:n], list(range(n)), (total, n))
+            self.assertTrue(all(2.0 - 1e-6 <= s <= 2.5 + 1e-6 for _, s in news_render.plan_segments(total, n)))
 
     def test_defaults_ask_for_eight_to_ten_pictures(self):
         from clipper.config import load_config

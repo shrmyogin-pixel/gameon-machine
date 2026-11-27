@@ -14,6 +14,7 @@ watermark bottom-left just above the y=1450 safe-zone line.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
 from .buckets import badge_label
@@ -28,12 +29,17 @@ log = logging.getLogger("clipper")
 TAIL_SECONDS = 0.3             # picture stays up a moment after the voice ends
 FPS = 30
 PICTURE_TIMEOUT = 600          # a picture render that takes longer than this is stuck
-KB_ZOOM = 0.08                 # Ken Burns: zoom grows from 1.00x to 1.08x within a cut (subtle, no shaky crops)
+KB_ZOOM = 0.14                 # Ken Burns: a still picture zooms from 1.00x to 1.14x within its cut, so it never sits
 CYAN, MAGENTA, WHITE, NAVY = "&H00FFF000&", "&H00D62BFF&", "&H00FFFFFF&", "&H00300A14&"   # Tokyo Neon (BGR)
 BADGE_YELLOW, BADGE_TEXT = "&H0000D4FF&", "&H00141414&"   # category badge: plain solid yellow, near-black text (BGR)
 KICKER_Y, NEWS_HOOK_Y = 150, 235      # kicker chip then the big hook, both below the Shorts top bar
-CUT_SECONDS = 3.4              # target length of a cut
-MIN_CUT, MAX_CUT = 2.5, 4.5    # every cut lasts between these
+IMAGE_CUT = (2.0, 2.5)         # seconds a still picture stays on screen
+VIDEO_CUT = (3.0, 4.0)         # seconds a video clip stays on screen
+
+
+def clips_needed(seconds: float, cap: int) -> int:
+    """How many clips fill a Short of this length on their own, at most `cap`."""
+    return max(0, min(cap, math.ceil((seconds + TAIL_SECONDS) / (sum(VIDEO_CUT) / 2))))
 XFADE = 0.4                    # seconds each transition overlaps the next picture
 TRANSITIONS = ["fade", "smoothleft", "slideleft", "smoothright", "wipeleft"]      # clean and calm: no spinning / zooming wipes
 
@@ -93,19 +99,39 @@ def scrim_png(path: Path) -> Path:
     return path
 
 
-def plan_segments(total: float, n_visuals: int, target: float = CUT_SECONDS) -> list[tuple[int, float]]:
-    """[(visual index, seconds)] covering `total`: a cut every MIN_CUT-MAX_CUT seconds (about `target`), cycling the
-    visuals so the same one never plays twice in a row (when there are at least two)."""
-    n_seg = max(1, round(total / target))
-    while n_seg > 1 and total / n_seg < MIN_CUT:
-        n_seg -= 1
-    while total / n_seg > MAX_CUT:
-        n_seg += 1
-    if n_visuals >= 2 and MIN_CUT <= total / n_visuals <= MAX_CUT:
-        n_seg = n_visuals                       # one cut per picture: nothing repeats
-    seg = total / n_seg
-    order = [i % max(n_visuals, 1) for i in range(n_seg)]
-    return [(idx, seg) for idx in order]
+def plan_segments(total: float, n_visuals: int, videos: set | frozenset = frozenset()) -> list[tuple[int, float]]:
+    """[(visual index, seconds)] covering `total`. Pictures stay IMAGE_CUT seconds, clips (`videos`: their indices)
+    VIDEO_CUT. When the clips can fill the whole length there are no pictures at all; otherwise each clip plays once,
+    alternating with pictures, and pictures then cycle, so none shows twice in a row (when there are at least two).
+    With no pictures at all the clips cycle."""
+    clips = sorted(v for v in videos if v < n_visuals)
+    stills = [i for i in range(max(n_visuals, 1)) if i not in videos]
+
+    def order():
+        if not stills or (clips and len(clips) * VIDEO_CUT[1] >= total):
+            while True:
+                yield from clips
+        p = 0
+        for v in clips:
+            yield v
+            yield stills[p % len(stills)]
+            p += 1
+        while True:
+            yield stills[p % len(stills)]
+            p += 1
+
+    picked, longest = [], 0.0
+    for i in order():
+        lo, hi = VIDEO_CUT if i in videos else IMAGE_CUT
+        picked.append((i, lo, hi))
+        longest += hi
+        if longest >= total - 1e-9:
+            break
+    low = sum(lo for _, lo, _ in picked)
+    share = min(max((total - low) / (longest - low), 0.0), 1.0)
+    secs = [lo + (hi - lo) * share for _, lo, hi in picked]
+    fit = total / sum(secs)                       # 1.0 except for very short totals
+    return [(i, s * fit) for (i, _, _), s in zip(picked, secs)]
 
 
 def lift_dark(img):
@@ -174,12 +200,27 @@ def render_news_video(cfg: Config, folder: Path, info: dict, words: list, dur: f
     raise last or RenderError("render failed")
 
 
+def is_video(path: Path) -> bool:
+    return Path(path).suffix.lower() == ".mp4"
+
+
+def video_chain(i: int, frames: int) -> str:
+    """A gameplay / trailer clip as one segment: a square crop of the footage over a blurred fill of itself."""
+    return (f"[{i}:v]fps={FPS},tpad=stop_mode=clone:stop_duration=3,trim=end_frame={frames},setpts=PTS-STARTPTS,"
+            f"split[va{i}][vb{i}];[va{i}]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=8:2,"
+            f"scale={W}:{H}[bg{i}];[vb{i}]scale={W}:{W}:force_original_aspect_ratio=increase,crop={W}:{W}[fg{i}];"
+            f"[bg{i}][fg{i}]overlay=0:(H-h)/2,setsar=1,format=yuv420p,settb=AVTB[z{i}]")
+
+
 def usable_pictures(files) -> list[Path]:
     """The files that exist and really decode as a picture big enough to fill a Short (the rest are dropped)."""
     import cv2
     out = []
     for f in files:
         f = Path(f)
+        if is_video(f) and f.is_file() and f.stat().st_size > 0:      # video clips were checked when they were cut
+            out.append(f)
+            continue
         try:
             img = cv2.imread(str(f)) if f.is_file() else None
         except Exception:
@@ -207,7 +248,7 @@ def _render(cfg: Config, folder: Path, info: dict, words: list, dur: float, visu
     seed = sum(map(ord, folder.name))
     if not visuals:
         raise RenderError("no usable real picture to show (placeholders are not allowed)")
-    segs = plan_segments(total, len(visuals))
+    segs = plan_segments(total, len(visuals), {i for i, v in enumerate(visuals) if is_video(v)})
     music_info = None
     try:
         args: list = []
@@ -219,12 +260,16 @@ def _render(cfg: Config, folder: Path, info: dict, words: list, dur: float, visu
         for i, (vi, seconds) in enumerate(segs):
             # each picture runs a little past its cut so the next one can fade/slide in over it
             n = round((seconds + (xf if i < k - 1 else 0.0)) * FPS)
+            if is_video(visuals[vi]):
+                args += ["-i", visuals[vi]]
+                chains.append(video_chain(i, n))
+                continue
             anchors = (0.5, 0.3, 0.7, 0.45, 0.6)
             vis = prep_visual(visuals[vi], folder / f"visual_{i}.jpg", anchors[(seed + i) % len(anchors)])
             made.append(vis)
             args += ["-loop", "1", "-framerate", str(FPS), "-t", f"{n / FPS:.3f}", "-i", vis]
             chains.append(f"[{i}:v]zoompan={motion(seed + i, n)}:d=1:s={W}x{H}:fps={FPS},eq=saturation=1.2:contrast=1.08:brightness=0.02,"
-                           f"setsar=1,format=yuv420p[z{i}]")
+                           f"setsar=1,format=yuv420p,settb=AVTB[z{i}]")
         args += ["-i", mp3, "-i", scrim]
         voice_idx, scrim_idx, next_idx = k, k + 1, k + 2
         joins, prev = [], "z0"

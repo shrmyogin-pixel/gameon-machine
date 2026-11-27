@@ -103,10 +103,11 @@ def plan(cfg: Config, clips: list[dict], now: datetime | None = None) -> dict[in
         if r and r["platform"] == "youtube" and not r["slot"] and manual(c)[1] == "youtube" and free:
             r["slot"] = free.pop(0)
             r["at"] = slot_at[r["slot"]]
-    for rank, c in enumerate(ranked, start=1):                  # 3) the automatic ranking fills what is left
+    promo_last = sorted(enumerate(ranked, start=1), key=lambda rc: rc[1].get("moment_kind") == "promo")
+    for rank, c in promo_last:                                  # 3) the automatic ranking fills what is left
         if c["id"] in out:
             continue
-        if free and not c.get("sensitive"):
+        if free and not c.get("sensitive") and c.get("moment_kind") != "promo":      # promo never takes a slot by itself
             name = free.pop(0)
             out[c["id"]] = {"platform": "youtube", "slot": name, "at": slot_at[name], "rank": rank}
         else:

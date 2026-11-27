@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import creators, db, gta
+from . import creators, db, gta, promo, tech
 from .config import PROJECT_ROOT, Config, get_env_key
 from .buckets import BUCKETS, classify, enforce_mix
 from .hookscore import HookScore, banned_in, closer_banned, names_subject, opener_of, rank_hooks, restates_hook, words_of
@@ -45,7 +45,7 @@ TTS_DEADLINE_SECONDS = 150
 # stories that are never made: gambling / betting spam, piracy, cheat tools and "free currency" scams
 HARD_SKIP = re.compile(
     r"\b(casinos?|sportsbooks?|bookmakers?|gambling|bet365|1xbet|betway|draftkings|fanduel|online slots|poker site|"
-    r"stake\.com|parlays?|wagering|"
+    r"stake\.com|parlays?|wagering|thunderpick|betboom|ggbet|rollbit|csgoroll|"
     # "betting" / "gamble" / "bet" alone are everyday idioms ("a big gamble"): they count only in a wagering context
     r"(?:sports?|online|esports|skin|crypto|match|live|in-game)[- ]betting|"
     r"betting (?:sites?|apps?|odds|markets?|sponsor\w*|partner\w*|compan(?:y|ies)|firms?|brands?|platforms?|operators?|"
@@ -58,8 +58,14 @@ HARD_SKIP = re.compile(
     r"free (?:v-?bucks|robux)|(?:v-?bucks|robux|money|gems?) generator|no (?:human )?verification|crypto airdrop)\b", re.I)
 # news --topic <name>: which stories qualify, what Claude is told, and which words do not tell two stories apart
 MODES = {"gta": (gta.is_gta_story, gta.PROMPT_NOTE, gta.COMMON, "GTA"),
-         "creators": (creators.is_story, creators.PROMPT_NOTE, creators.COMMON, "creator")}
+         "creators": (creators.is_story, creators.PROMPT_NOTE, creators.COMMON, "creator"),
+         "tech": (tech.is_story, tech.PROMPT_NOTE, tech.COMMON, "gaming tech"),
+         "promo": (promo.is_story, promo.PROMPT_NOTE, promo.COMMON, "deal or gear")}
 KINDS = {"news": "BREAKING NEWS", "free_offer": "FREE GAME OFFER", "trend": "TRENDING NOW"}
+
+
+class _Skip(Exception):
+    """Not an error: a bookkeeping step that does not apply to this run."""
 
 
 class NewsError(Exception):
@@ -141,8 +147,11 @@ def fetch_stories(cfg: Config, hours: float | None = None, now: datetime | None 
     now = now or datetime.now(timezone.utc)
     hours = float(hours if hours is not None else cfg.news["hours"])
     cutoff = now - timedelta(hours=hours)
-    seen_urls = db.news_urls_seen(cfg.database) if cfg.database.exists() else set()
+    in_promo = cfg.news.get("only") == "promo"
+    seen_urls = db.news_urls_seen(cfg.database, in_promo) if cfg.database.exists() else set()
     seen_keys = db.seen_story_keys(cfg.database) if cfg.database.exists() else set()   # rejected / uploaded / cleaned
+    if in_promo:                                     # a promo run also honours what was rejected / uploaded from promo
+        seen_keys |= {k[2:] for k in seen_keys if k.startswith("p:")}
     seen_keys |= {url_key(u) for u in seen_urls}
     found: list[Story] = []
     for feed in cfg.news_feeds:
@@ -454,9 +463,12 @@ def pick_stories(cfg: Config, stories: list[Story], n: int, work_dir: Path, tren
                 return []                    # a clean "nothing today", not a broken reply
             picks = validate_reply(reply, stories, cfg)
             only = cfg.news.get("only")
-            if only == "creators":
-                for p in picks:
-                    p.bucket = "creator"                 # the pill reads CREATOR NEWS whatever the game
+            if only == "promo":
+                for p in picks:                          # GAME DEAL or TECH PICK, from the headline itself
+                    p.bucket = promo.bucket_for(p.story.title)
+            if only in ("creators", "tech"):
+                for p in picks:                          # the pill reads CREATOR NEWS / GAMING TECH whatever the game
+                    p.bucket = "creator" if only == "creators" else "tech"
             if only:
                 kept, dropped = gta.enforce_angles(picks, _covered_headlines(cfg, now), MODES[only][2])
             else:
@@ -480,14 +492,16 @@ def _covered_headlines(cfg: Config, now: datetime) -> list[str]:
     """Source headlines and titles of the Shorts of the last 24 hours (headlines survive Reject / Mark Uploaded)."""
     since = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     try:
-        return db.recent_topic_headlines(cfg.database, since) + db.recent_news_titles(cfg.database, since)
+        return (db.recent_topic_headlines(cfg.database, since)
+                + db.recent_news_titles(cfg.database, since, cfg.news.get("only") == "promo"))
     except Exception:
         return []
 
 
 def _recent_titles(cfg: Config, now: datetime) -> list[str]:
     try:
-        return db.recent_news_titles(cfg.database, (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"))
+        return db.recent_news_titles(cfg.database, (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"),
+                                     cfg.news.get("only") == "promo")
     except Exception:
         return []
 
@@ -671,6 +685,23 @@ def collect_visuals(cfg: Config, story: Story, folder: Path, topic: str | None =
     return visuals
 
 
+def collect_clips(cfg: Config, pick: Pick, folder: Path, seconds: float) -> list[dict]:
+    """As many video clips as a Short of `seconds` needs, at most [news] videos_max (videosearch.py, every command);
+    [] when off or nothing was found."""
+    if not cfg.news.get("video", True):
+        return []
+    from . import videosearch
+    from .news_render import clips_needed
+    try:
+        return videosearch.fetch_clips(cfg, list(pick.subjects), folder, PROJECT_ROOT / "assets" / "gameplay",
+                                       clips_needed(seconds, int(cfg.news.get("videos_max", 15))), float(cfg.news["image_timeout"]),
+                                       kind=pick.bucket, exclude=pick.story.link,
+                                       youtube=bool(cfg.news.get("youtube", True)))
+    except Exception:
+        log.exception("news: video hunt failed (using pictures)")
+        return []
+
+
 def _recently_used_pictures(cfg: Config) -> list:
     """Fingerprints of the pictures shown in the last [news] picture_repeat_hours, so two Shorts about one game differ."""
     hours = float(cfg.news.get("picture_repeat_hours", 48))
@@ -699,12 +730,13 @@ def make_short(cfg: Config, pick: Pick) -> Path:
 
     story = pick.story
     folder = _new_folder(cfg, story.outlet)
-    db.add_clip(cfg.database, "news", story.outlet, folder.name, stream=story.link, lang="en", moment_kind="news",
+    in_promo = cfg.news.get("only") == "promo"
+    db.add_clip(cfg.database, "news", story.outlet, folder.name, stream=story.link, lang="en",
+                moment_kind="promo" if in_promo else "news",
                 moment_at=datetime.now().isoformat(timespec="seconds"), pre_score=pick.hook.total,
                 source_url=story.link)
     try:
         (folder / "script.txt").write_text(pick.script + "\n", encoding="utf-8")
-        visuals = collect_visuals(cfg, story, folder, pick.subjects[0] if pick.subjects else None)
         track = choose_music(cfg, folder.name)                        # None = no music
         mp3 = folder / "voiceover.mp3"
         voice = synthesize(cfg, pick.script, mp3)
@@ -724,18 +756,30 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         from .pacing import tighten
         words, dur, _saved = tighten(cfg, mp3, words, dur)          # dead-air pauses over 0.7 s are cut down
         (folder / "words.json").write_text(json.dumps(words, ensure_ascii=False), encoding="utf-8")
+        clips = collect_clips(cfg, pick, folder, dur)                # now that the length is known
+        try:
+            visuals = collect_visuals(cfg, story, folder, pick.subjects[0] if pick.subjects else None)
+        except NewsError:
+            if len(clips) < 3:                            # too few pictures only matters without enough video
+                raise
+            visuals = []
+        shown = [c["file"] for c in clips] + [v["file"] for v in visuals]      # the renderer alternates them
+        log.info("[%s] news visuals: %d video clip(s) (%s), %d picture(s)", folder.name, len(clips),
+                 ", ".join(sorted({c["source"] for c in clips})) or "none", len(visuals))
 
         info = {"hook": pick.hook.hook, "headline": pick.headline, "kind": pick.kind, "outlet": story.outlet,
-                "title": pick.title, "images": [v["file"] for v in visuals], "music": track, "lang": "en",
+                "title": pick.title, "images": shown, "music": track, "lang": "en",
                 "bucket": pick.bucket, "subjects": pick.subjects}
         render = render_news_video(cfg, folder, info, words, dur)
 
         credit = credit_for_story(story)
         used_music = render.get("music")                              # what the renderer REALLY used (it may have dropped it)
         trend = bool(story.trend)
-        origin = (f"Inspired by a trending topic (rewritten from scratch, no third-party footage used): {story.link}"
+        origin = (f"Inspired by a trending topic (rewritten from scratch): {story.link}"
                   if trend else f"Read the original story: {story.link}")
         credit_lines = [pick.description, origin]
+        video_credits = list(dict.fromkeys(c["credit"] for c in clips))
+        credit = "; ".join([credit, *video_credits])                 # every video source is on the credit line itself
         if any(v["kind"] == "article" for v in visuals):
             credit_lines.append(f"Images: {story.outlet} (article pictures)")
         if any(v["kind"] == "topic" for v in visuals):
@@ -758,6 +802,7 @@ def make_short(cfg: Config, pick: Pick) -> Path:
                      "hooks": [{"hook": h.hook, "score": h.total, "valid": h.valid, "parts": h.parts,
                                 "reasons": h.reasons} for h in pick.hooks],
                      "voice": voice, "word_timestamps": how,
+                     "videos": [{"url": c["url"], "source": c["source"]} for c in clips],
                      "images": [{"url": v["url"], "source": v["source"], "kind": v["kind"]}
                                 for v in visuals]},
             "music": ({"title": used_music["title"], "file": used_music["file"], "attribution": used_music.get("attribution"),
@@ -769,13 +814,18 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         db.record_files(cfg.database, folder.name, folder)
         db.set_clip_status(cfg.database, folder.name, "rendered")
         try:
+            if in_promo:
+                raise _Skip
             from .imagesearch import hashes_of
             db.add_used_pictures(cfg.database, hashes_of([v["file"] for v in visuals]))
+        except _Skip:
+            pass
         except Exception:
             log.exception("[%s] could not remember its pictures (ignored)", folder.name)
         try:
             from . import topics
-            topics.remember(cfg, pick)                                   # so this game is not repeated for 24 h
+            if not in_promo:                                 # promo never blocks a game for the other commands
+                topics.remember(cfg, pick)                                   # so this game is not repeated for 24 h
         except Exception:
             log.exception("[%s] could not remember the topic (ignored)", folder.name)
         log.info("[%s] NEWS Short ready: %s | hook score %.1f | %.1fs | timestamps: %s | source: %s",

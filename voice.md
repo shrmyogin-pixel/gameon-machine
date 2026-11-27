@@ -89,6 +89,6 @@ Never use: "what is up guys", "hey guys", "welcome back", "you won't believe",
 - Last line of the description: `Sources & Credits: <outlet / streamer / platform>, <link or handle>`
 
 ## Pictures (for the editor's awareness)
-- Every Short cuts between 8-10 REAL pictures every 2.5-4.5 s (the article's own, topped up with screenshots of the game / streamer named in the hook).
+- Every Short shows video clips (3-4 s, at most 15), with REAL pictures (2-2.5 s) alternating when footage runs short: the article's own, topped up with screenshots of the game / streamer named in the hook.
   Never a letter card, meme card or "LOL" / "GG" placeholder.
   Write about things that are visible in a game: name the game exactly as it is known so the picture search finds it.

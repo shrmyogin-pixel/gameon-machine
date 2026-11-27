@@ -286,7 +286,8 @@ class PictureRenderTests(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(dir=self.tmp.name))
         self.cfg = load_config()
         # these tests build 3-4 fixture pictures: pin the old 4-6 picture settings (the shipped 8-10 are tested in test_pacing)
-        self.cfg.raw["news"] = {**self.cfg.raw.get("news", {}), "images_min": 4, "images_max": 6, "images_floor": 3}
+        self.cfg.raw["news"] = {**self.cfg.raw.get("news", {}), "images_min": 4, "images_max": 6, "images_floor": 3,
+                                "video": False}                                 # tests never go looking for video
         self.cfg.database = self.root / "c.sqlite"
         self.cfg.clips_dir = self.root / "clips"
         self.cfg.data_dir = self.root
@@ -322,14 +323,28 @@ class PictureRenderTests(unittest.TestCase):
                         "-frames:v", "1", str(out)], check=True)
         return cv2.imread(str(out)).astype(int)
 
-    def test_segments_cut_every_two_and_a_half_to_four_and_a_half_seconds_and_cycle_the_visuals(self):
+    def test_still_pictures_cut_every_two_to_two_and_a_half_seconds_and_cycle(self):
         for total in (30.5, 33.0, 35.8, 40.0):
             segs = news_render.plan_segments(total, 4)
             self.assertAlmostEqual(sum(s for _, s in segs), total, places=6)
-            self.assertTrue(all(2.5 <= s <= 4.5 for _, s in segs), (total, segs))
+            self.assertTrue(all(2.0 - 1e-6 <= s <= 2.5 + 1e-6 for _, s in segs), (total, segs))
             self.assertTrue(all(a[0] != b[0] for a, b in zip(segs, segs[1:])))       # never the same picture twice in a row
         self.assertEqual({i for i, _ in news_render.plan_segments(33.0, 3)}, {0, 1, 2})
-        self.assertEqual(len(news_render.plan_segments(33.0, 1)), 10)                  # a single picture still gets motion cuts
+
+    def test_clips_play_once_for_three_to_four_seconds_between_pictures(self):
+        segs = news_render.plan_segments(33.0, 13, {0, 1, 2, 3, 4})
+        self.assertAlmostEqual(sum(s for _, s in segs), 33.0, places=6)
+        self.assertEqual([i for i, _ in segs if i < 5], [0, 1, 2, 3, 4])
+        self.assertEqual([i < 5 for i, _ in segs[:6]], [True, False] * 3)
+        for i, s in segs:
+            lo, hi = (3.0, 4.0) if i < 5 else (2.0, 2.5)
+            self.assertTrue(lo - 1e-6 <= s <= hi + 1e-6, (i, s))
+
+    def test_enough_clips_leave_no_room_for_pictures(self):
+        self.assertEqual(news_render.clips_needed(33.0, 15), 10)
+        self.assertEqual(news_render.clips_needed(90.0, 15), 15)
+        segs = news_render.plan_segments(33.0, 20, set(range(10)))
+        self.assertTrue(all(i < 10 and 3.0 - 1e-6 <= s <= 4.0 + 1e-6 for i, s in segs), segs)
 
     def test_motions_are_varied(self):
         self.assertEqual(len({news_render.motion(k, 150) for k in range(5)}), 5)
@@ -337,7 +352,7 @@ class PictureRenderTests(unittest.TestCase):
     def test_multi_picture_short_cuts_between_visuals_with_music(self):
         dur, words = self.voice(long=True)
         r = news_render.render_news_video(self.cfg, self.folder, {**self.info, "images": self.pics(3), "music": self.track}, words, dur)
-        self.assertEqual((r["background"], r["visuals"], r["cuts"]), ("picture", 3, 5))
+        self.assertEqual((r["background"], r["visuals"], r["cuts"]), ("picture", 3, 7))
         self.assertEqual(self.probe(self.folder / "clip.mp4"), "h264,1080,1920,30/1")
         self.assertEqual(r["music"]["title"], "Test Track")
         self.assertEqual(r["music"]["attribution"], ATTRIBUTION)
@@ -345,11 +360,11 @@ class PictureRenderTests(unittest.TestCase):
         self.assertEqual(self.probe(self.folder / "clip.mp4", "stream=codec_name", "a:0"), "aac")
         for left in ("scrim.png", "captions.ass") + tuple(f"visual_{i}.jpg" for i in range(3)):
             self.assertFalse((self.folder / left).exists(), left)
-        # cut points (5 cuts over ~16.3 s) are at ~3.3 s, ~6.5 s, ~9.8 s and ~13.1 s: frames either side of a cut differ a lot, frames within a cut differ little
-        across = np.abs(self.frame(3.1, "a.png") - self.frame(3.8, "b.png")).mean()
-        within = np.abs(self.frame(1.0, "c.png") - self.frame(1.5, "d.png")).mean()
-        self.assertGreater(across, 3 * within)
-        self.assertGreater(float(np.abs(self.frame(0.2, "e.png") - self.frame(3.6, "f.png")).mean()), 1.0)
+        # 7 cuts over ~16.3 s, one every ~2.3 s: frames either side of a cut differ more than frames within one
+        across = np.abs(self.frame(2.0, "a.png") - self.frame(2.8, "b.png")).mean()
+        within = np.abs(self.frame(0.8, "c.png") - self.frame(1.1, "d.png")).mean()
+        self.assertGreater(across, 1.5 * within)
+        self.assertGreater(float(np.abs(self.frame(0.2, "e.png") - self.frame(2.8, "f.png")).mean()), 1.0)
         # scrim: the caption zone (dark scrim behind the captions) is darker than the same picture region unscrimmed
         g = self.frame(1.5, "g.png")
         self.assertLess(float(g[1500:1750].mean()), float(g[700:1000].mean()))
@@ -420,6 +435,23 @@ class PictureRenderTests(unittest.TestCase):
             return out
         with mock.patch.object(newsimage, "download", fake_dl), mock.patch.object(news, "synthesize", synth), words,                 mock.patch.object(imagesearch, "fetch_topic_images", fake_topic):
             return news.make_short(self.cfg, pick)
+
+    def test_video_sources_are_on_the_credit_line_of_the_upload_sheet(self):
+        from clipper import export
+        video = "Video: Rockstar Games (YouTube) https://youtu.be/abc123"
+
+        def fake_clips(cfg, pick, folder, seconds):
+            out = folder / "news_video_1.mp4"
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                            "testsrc2=s=640x360:r=30:d=4.5", "-pix_fmt", "yuv420p", str(out)], check=True)
+            return [{"file": out, "url": "https://youtu.be/abc123", "source": "youtube", "credit": video}]
+
+        with mock.patch.object(news, "collect_clips", fake_clips):
+            folder = self.make_short(pictures=3)
+        row = db.clip_by_folder(self.cfg.database, folder.name)
+        last = row["description"].splitlines()[-1]
+        self.assertEqual(last, f"{CREDIT}; {video}")
+        self.assertIn(video, export.sheet_description(export.build_sheet(row, folder, "a.mp4", None)))
 
     def test_make_short_three_plus_pictures_music_and_attribution(self):
         folder = self.make_short(pictures=3)

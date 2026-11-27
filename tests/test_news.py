@@ -379,7 +379,7 @@ class MakeShortTests(unittest.TestCase):
         root = Path(tempfile.mkdtemp(dir=self.tmp.name))
         self.cfg = load_config()
         # these tests build 3-4 fixture pictures: pin the old 4-6 picture settings (the shipped 8-10 are tested in test_pacing)
-        self.cfg.raw["news"] = {**self.cfg.raw.get("news", {}), "images_min": 4, "images_max": 6, "images_floor": 3}
+        self.cfg.raw["news"] = {**self.cfg.raw.get("news", {}), "images_min": 4, "images_max": 6, "images_floor": 3, "video": False}
         self.cfg.database = root / "c.sqlite"
         self.cfg.clips_dir = root / "clips"
         self.cfg.data_dir = root

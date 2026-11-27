@@ -194,6 +194,8 @@ def fetch_topic_images(topic: str, folder: Path, cache_root: Path, need: int, kn
                 return False
             if looks_like_ui(hit["title"], url):                 # store / price / menu screenshots are not game art
                 return False
+            if newsimage.GAMBLING_SOURCE.search(f"{hit['title']} {hit['page']} {url}"):
+                return False
             downloads += 1
             probe = folder / "topic_probe.jpg"
             try:
