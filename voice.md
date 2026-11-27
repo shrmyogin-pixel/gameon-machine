@@ -81,7 +81,7 @@ Never use: "what is up guys", "hey guys", "welcome back", "you won't believe",
 - Add original commentary/context so the edit is transformative — never just re-upload.
 
 ## Captions
-- Word-by-word pop captions burned in: 2–3 words per line, the word being spoken lights up (electric cyan, neon yellow for
+- Word-by-word pop captions burned in: 2–3 words per line, the word being spoken lights up (golden yellow, bright green for
   numbers and trigger words) with a quick pop. Hindi uses Nirmala UI / Mangal. Always above y=1450.
 - Mask profanity (e.g. "s***", "f***").
 

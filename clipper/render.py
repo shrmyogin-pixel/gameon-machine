@@ -203,7 +203,7 @@ def caption_groups(words: list, start: float, end: float, per: int = WORDS_PER_C
 
 
 HOOK_COLOUR = "&H00FFFFFF&"
-ACCENT = "&H0000F2FF&"          # ASS colour (BGR): neon yellow for the key word
+ACCENT = "&H0000D4FF&"          # ASS colour (BGR): golden yellow #FFD400 for the key word, same as the badge
 ACCENT_WORDS = {"FREE", "LEAK", "LEAKED", "NEW", "BREAKING", "DELAYED", "CONFIRMED", "REVEALED", "BANNED", "EXCLUSIVE",
                 "RELEASE", "DLC", "UPDATE", "WIN", "WINS", "FINALLY", "SECRET", "HUGE", "INSANE", "OFFICIAL"}
 
@@ -244,8 +244,8 @@ def pop_tags(ms: int = 220, start_pct: int = 72, peak_pct: int = 112, fade_ms: i
 
 # ---- word-by-word pop captions: 2-3 words per line, the spoken word lights up and pops ----
 CAP_WHITE = "&H00FFFFFF&"
-CAP_CYAN = "&H00FFF000&"             # electric cyan (BGR): the word being spoken
-CAP_YELLOW = "&H0000F2FF&"           # neon yellow: the spoken word when it is a number / price / news trigger word
+CAP_SPOKEN = "&H0000D4FF&"           # golden yellow #FFD400 (BGR): the word being spoken
+CAP_TRIGGER = "&H006EFF3D&"          # bright green #3DFF6E: the spoken word when it is a number / price / news trigger word
 CAP_LINE_H = 1.25                    # line height as a multiple of the font size
 SENTENCE_END = re.compile(r"[.!?…][\"')\]]*$")
 
@@ -282,8 +282,8 @@ def word_lines(words: list, start: float, end: float, per: int = 3) -> list[list
 
 def pop_caption_events(words: list, start: float, end: float, lang: str = "en", y: int = CAPTION_Y, per: int = 3,
                        layer: int = 1, size: int | None = None, style: str = "Cap") -> list[str]:
-    """ASS Dialogue lines: for every spoken word one event that shows its whole line with THAT word in electric cyan
-    (neon yellow for numbers / trigger words) and a quick pop (80% -> 118% -> 100%); the line fades in on its first word.
+    """ASS Dialogue lines: for every spoken word one event that shows its whole line with THAT word in golden yellow
+    (bright green for numbers / trigger words) and a quick pop (80% -> 118% -> 100%); the line fades in on its first word.
     Centred on y (default 1180); a two-line caption of this font size is kept above the y=1450 safe-zone limit.
     Devanagari (lang 'hi') is case-less and uses the Nirmala UI / Mangal font set by caption_fonts()."""
     size = size or caption_fonts(lang)["cap_size"]
@@ -303,7 +303,7 @@ def pop_caption_events(words: list, start: float, end: float, lang: str = "en", 
             t0 = max(a, 0.0)
             t1 = max(line[wi + 1][0] if wi + 1 < len(line) else line_end, t0 + 0.08)
             plain = re.sub(r"[^\w]", "", texts[wi])
-            hl = CAP_YELLOW if (any(c.isdigit() for c in plain) or plain in ACCENT_WORDS) else CAP_CYAN
+            hl = CAP_TRIGGER if (any(c.isdigit() for c in plain) or plain in ACCENT_WORDS) else CAP_SPOKEN
             parts = []
             for j, t in enumerate(texts):
                 if j == wi:

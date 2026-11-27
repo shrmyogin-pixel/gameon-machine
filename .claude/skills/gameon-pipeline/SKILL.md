@@ -16,9 +16,9 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - `[general] autopost = false`. Never add code that uploads or publishes.
 
 ## Look
-- **Captions: `refs/no change.JPG` is the reference. Do not restyle or move them.**
-  Word-by-word, 2-3 words, Impact 100, white with the spoken word in cyan (yellow for numbers and trigger words),
-  dark navy outline with magenta shadow, centred at y=1180; small `Source: <outlet>` line at y=1330.
+- **Captions: layout as in `refs/no change.JPG` (colours changed on request). Do not restyle or move them.**
+  Word-by-word, 2-3 words, Impact 100, white with the spoken word in golden yellow #FFD400 (green #3DFF6E for numbers and trigger words),
+  black outline and shadow, no glow (hook: same white, gold, black), centred at y=1180; small `Source: <outlet>` line at y=1330.
   Code: `render.pop_caption_events`, style `Cap` in `news_render.build_news_ass`.
 - **Category pill: normal solid yellow fill, dark text.** Opaque box (ASS `BorderStyle 3`), fill `&H0000D4FF&`,
   text `&H00141414&`, no glow, no neon, no shadow. `refs/change 1.JPG` shows the old glowing pill: do not go back to it.

@@ -503,12 +503,12 @@ class MakeShortTests(unittest.TestCase):
         import re
         plain = re.sub(r"\{[^}]*\}", "", ass)                                           # text without override tags
         self.assertIn("GTA 6 OFFICIALLY HITS PLAYSTATION RECORDS", plain)
-        self.assertIn("{\\c&H0000F2FF&}6{", ass)                                        # the number is the accent word
+        self.assertIn("{\\c&H0000D4FF&}6{", ass)                                        # the number is the accent word
         self.assertIn("\\fscx72", ass)                                                  # pop-in animation on the captions
         self.assertIn("xfade", Path(news_render.__file__).read_text(encoding="utf-8"))
         self.assertIn("Source: IGN", ass)
         self.assertIn("S*** SO", plain)                                                 # captions: 2-3 words per line, masked
-        self.assertIn(r"{\c&H00FFF000&\fscx80", ass)                                    # the spoken word: cyan + pop
+        self.assertIn(r"{\c&H0000D4FF&\fscx80", ass)                                    # the spoken word: gold + pop
         self.assertIn(f"\\pos(540,{news_render.CAPTION_Y})", ass)
         self.assertLess(news_render.CAPTION_Y, news_render.SAFE_BOTTOM)
         self.assertIn("Style: Cap,Impact,100", ass)

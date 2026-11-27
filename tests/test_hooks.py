@@ -65,7 +65,7 @@ class BadgeTests(unittest.TestCase):
         badge, cap = style["Style: Kicker"], style["Style: Cap"]
         self.assertEqual((badge[3], badge[5], badge[6]), ("&H00141414&", "&H0000D4FF&", "&H0000D4FF&"))
         self.assertEqual((badge[15], badge[17]), ("3", "0"))                 # opaque box, no shadow
-        self.assertEqual(cap[1:], ["Impact", "100", "&H00FFFFFF&", "&H000000FF", "&H00300A14&", "&H00D62BFF&",
+        self.assertEqual(cap[1:], ["Impact", "100", "&H00FFFFFF&", "&H000000FF", "&H00101010&", "&H00000000",
                                    "0", "0", "0", "0", "100", "100", "1", "0", "1", "9", "6", "5", "90", "90", "0", "1"])
 
 

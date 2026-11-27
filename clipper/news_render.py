@@ -30,7 +30,7 @@ TAIL_SECONDS = 0.3             # picture stays up a moment after the voice ends
 FPS = 30
 PICTURE_TIMEOUT = 600          # a picture render that takes longer than this is stuck
 KB_ZOOM = 0.14                 # Ken Burns: a still picture zooms from 1.00x to 1.14x within its cut, so it never sits
-CYAN, MAGENTA, WHITE, NAVY = "&H00FFF000&", "&H00D62BFF&", "&H00FFFFFF&", "&H00300A14&"   # Tokyo Neon (BGR)
+WHITE, BLACK = "&H00FFFFFF&", "&H00101010&"             # hook and captions: white on a black outline, gold accent (BGR)
 BADGE_YELLOW, BADGE_TEXT = "&H0000D4FF&", "&H00141414&"   # category badge: plain solid yellow, near-black text (BGR)
 KICKER_Y, NEWS_HOOK_Y = 150, 235      # kicker chip then the big hook, both below the Shorts top bar
 IMAGE_CUT = (2.0, 2.5)         # seconds a still picture stays on screen
@@ -64,11 +64,10 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Hook,{f['Hook']},{hook_size},{WHITE},&H000000FF,{CYAN},{MAGENTA},0,0,0,0,100,100,2,0,1,8,6,8,90,90,0,1
-Style: Glow,{f['Hook']},{hook_size},{CYAN},&H000000FF,{MAGENTA},&H00000000,0,0,0,0,100,100,2,0,1,16,0,8,90,90,0,1
-Style: Cap,{f['Cap']},{f['cap_size']},{WHITE},&H000000FF,{NAVY},{MAGENTA},0,0,0,0,100,100,1,0,1,9,6,5,90,90,0,1
+Style: Hook,{f['Hook']},{hook_size},{WHITE},&H000000FF,{BLACK},&H00000000,0,0,0,0,100,100,2,0,1,9,5,8,90,90,0,1
+Style: Cap,{f['Cap']},{f['cap_size']},{WHITE},&H000000FF,{BLACK},&H00000000,0,0,0,0,100,100,1,0,1,9,6,5,90,90,0,1
 Style: Kicker,{f['head']},46,{BADGE_TEXT},&H000000FF,{BADGE_YELLOW},{BADGE_YELLOW},0,0,0,0,100,100,3,0,3,14,0,8,90,90,0,1
-Style: Src,{f['head']},34,&H00F0F0F0,&H000000FF,{NAVY},&H96000000,0,0,0,0,100,100,0,0,1,5,3,8,90,90,0,1
+Style: Src,{f['head']},34,&H00F0F0F0,&H000000FF,{BLACK},&H96000000,0,0,0,0,100,100,0,0,1,5,3,8,90,90,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -76,8 +75,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     t0, t1 = _ass_time(0), _ass_time(total)
     def ev(layer: int, style: str, x: int, y: int, tags: str, text: str, an: int = 8) -> str:
         return f"Dialogue: {layer},{t0},{t1},{style},,0,0,0,,{{\\an{an}\\pos({x},{y}){tags}}}{text}"
-    lines = [ev(1, "Glow", W // 2, NEWS_HOOK_Y, "\\blur10" + pop_tags(260), hook),            # neon glow under the hook
-             ev(2, "Hook", W // 2, NEWS_HOOK_Y, "\\blur1" + pop_tags(260), accent_text(hook, ACCENT, WHITE)),
+    lines = [ev(2, "Hook", W // 2, NEWS_HOOK_Y, "\\blur1" + pop_tags(260), accent_text(hook, ACCENT, WHITE)),
              ev(3, "Kicker", W // 2, KICKER_Y, pop_tags(240, 60, 110), kicker),
              ev(0, "Src", W // 2, 1330, "", source)]
     lines += pop_caption_events(words, 0.0, dur + 0.05, lang, y=CAPTION_Y, size=f["cap_size"])

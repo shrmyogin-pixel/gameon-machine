@@ -46,9 +46,9 @@ class CaptionTests(unittest.TestCase):
     def test_one_event_per_word_with_active_word_colour_and_pop(self):
         ev = pop_caption_events(self.words, 0.0, 10.0)
         self.assertEqual(len(ev), len(self.words))
-        self.assertIn("&H00FFF000&", ev[0])                  # electric cyan on the spoken word
+        self.assertIn("&H0000D4FF&", ev[0])                  # golden yellow on the spoken word
         self.assertIn(r"\fscx118", ev[0])                   # the pop
-        self.assertIn("&H0000F2FF&", ev[4])                  # neon yellow for the number
+        self.assertIn("&H006EFF3D&", ev[4])                  # bright green for the number
         self.assertTrue(all(r"\pos(540," in e for e in ev))
 
     def test_profanity_masked_and_inside_safe_zone(self):
