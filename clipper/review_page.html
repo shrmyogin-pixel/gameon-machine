@@ -38,6 +38,8 @@
   .badge.status-skipped, .badge.status-new, .badge.status-edited { background: #2f3238; color: var(--dim); }
   .badge.banger { background: #4a2a10; color: var(--fire); }
   .badge.sens { background: #5a1e20; color: #ff8a80; }
+  .badge.mature { background: #c62828; color: #fff; font-size: 12px; }
+  .card.mature { border: 2px solid var(--bad); }
   .badge.clean { background: #1b3d2a; color: var(--ok); }
   .badge.route-youtube { background: #4a1f1f; color: #ff9a8f; }
   .badge.route-other { background: #1f3a4a; color: #8fd0ff; }
@@ -192,7 +194,8 @@ function card(clip) {
 
   const openBtn = h("button", { class: "openfolder", title: "Show this file in Windows File Explorer", onclick: async () => {
     try { await api("/api/clips/" + clip.id + "/open", {}); } catch (e) { toast(e.message, true); } } }, "📂 Open Folder");
-  const root = h("article", { class: "card" + (clip.sensitive ? " sensitive" : "") + (clip.status === "approved" ? " approved" : ""),
+  const mature = clip.mature_flag && clip.mature_flag !== "unchecked" ? clip.mature_flag : "";
+  const root = h("article", { class: "card" + (mature ? " mature" : "") + (clip.sensitive ? " sensitive" : "") + (clip.status === "approved" ? " approved" : ""),
     "data-id": clip.id });
   const buttons = [];
   const act = (label, cls, action, confirmMsg) => {
@@ -272,6 +275,11 @@ function card(clip) {
     media.append(h("div", { class: "nomedia" }, "No video (" + clip.status + ")"));
   }
   root.append(media);
+  if (mature) root.append(h("div", { class: "row" },
+    h("span", { class: "badge mature" }, "⚠ MATURE / STEAM FLAG: GORE OR SEXUAL CONTENT")),
+    h("div", { class: "warn" }, "Steam flags " + mature + ". Watch the whole Short before approving."));
+  else if (clip.mature_flag === "unchecked") root.append(h("div", { class: "note" },
+    "Steam content flags could not be checked for this Short."));
 
   root.append(h("div", { class: "row" },
     h("span", { class: "score" }, num(clip.ai_score), h("small", {}, " AI")),
@@ -306,9 +314,12 @@ function card(clip) {
   if (clip.local_path) root.append(h("div", { class: "localpath", title: "Where this file is on your PC" }, clip.local_path));
   const canReview = clip.can_review;
   const s = clip.status;
+  const cautions = [mature ? "MATURE / STEAM FLAG: GORE OR SEXUAL CONTENT (" + mature + ")" : "",
+    clip.sensitive ? "This clip was flagged sensitive:\n" + (clip.sensitive_reason || "") : ""].filter(Boolean);
+  const approveAsk = cautions.length ? cautions.join("\n\n") + "\n\nApprove anyway?" : null;
   root.append(h("div", { class: "buttons" }, saveBtn, clip.local_path ? openBtn : null,
-    canReview && !clip.files_deleted && (s === "rendered" || s === "rejected") ? act("✔ Approve", "approve", "approve",
-      clip.sensitive ? "This clip was flagged sensitive:\n" + (clip.sensitive_reason || "") + "\n\nApprove anyway?" : null) : null,
+    canReview && !clip.files_deleted && (s === "rendered" || s === "rejected")
+      ? act("✔ Approve", "approve", "approve", approveAsk) : null,
     canReview && (s === "rendered" || s === "approved") ? act("✖ Reject", "reject", "reject",
       "Reject this clip? Its files are deleted immediately" + (clip.platform === "news" ? " and the story is never made again." : ".")) : null,
     canReview && (s === "rendered" || s === "approved") ? act("📤 Mark Uploaded", "uploaded", "uploaded",

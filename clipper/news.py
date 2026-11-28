@@ -898,6 +898,14 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         db.record_files(cfg.database, folder.name, folder)
         db.set_clip_status(cfg.database, folder.name, "rendered")
         qa.record(cfg, folder, analysis["description_full"], source_notes)
+        try:                                                  # a warning tag for the reviewer; never skips a story
+            from .videosearch import mature_flag
+            flag = mature_flag(list(pick.subjects), float(cfg.news["image_timeout"]))
+            db.set_mature_flag(cfg.database, folder.name, flag)
+            if flag and flag != "unchecked":
+                log.warning("[%s] Steam flags gore or sexual content: %s (check before approving)", folder.name, flag)
+        except Exception:
+            log.exception("[%s] could not check the Steam content flags (ignored)", folder.name)
         if pick.hook_pattern:
             try:
                 db.set_hook(cfg.database, folder.name, pick.hook_pattern)

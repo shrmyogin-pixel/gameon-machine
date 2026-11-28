@@ -237,5 +237,38 @@ class QaTests(Temp):
         self.assertEqual(row["qa_warnings"], ["clip.mp4 is missing or empty"])
 
 
+class MatureFlagTests(Temp):
+    def flag(self, ids, subjects=("Showa American Story",)):
+        from clipper import videosearch
+
+        def fake(url, timeout):
+            if "storesearch" in url:
+                return {"items": [{"type": "app", "id": 7, "name": "Showa American Story"}]}
+            return {"7": {"data": {"content_descriptors": {"ids": ids}}}}
+        with mock.patch.object(videosearch, "_json", fake):
+            return videosearch.mature_flag(list(subjects))
+
+    def test_gore_and_sexual_flags_are_named_and_others_are_not(self):
+        for ids in ([1], [2], [3], [4]):
+            self.assertEqual(self.flag(ids), "Showa American Story", ids)
+        self.assertEqual(self.flag([5]), "")
+        self.assertEqual(self.flag([2], subjects=("Some Other Game",)), "")
+
+    def test_a_failed_lookup_is_said_not_hidden(self):
+        from clipper import videosearch
+        with mock.patch.object(videosearch, "_json", side_effect=OSError("down")):
+            self.assertEqual(videosearch.mature_flag(["Showa American Story"]), "unchecked")
+
+    def test_the_flag_reaches_the_dashboard(self):
+        from clipper import review
+        db.add_clip(self.cfg.database, "news", "IGN", "n1")
+        db.init_db(self.cfg.database)
+        db.set_mature_flag(self.cfg.database, "n1", "Showa American Story")
+        self.cfg.clips_dir = self.root / "clips"
+        view = review.clip_view(db.list_clips(self.cfg.database)[0], self.cfg)
+        self.assertEqual(view["mature_flag"], "Showa American Story")
+        self.assertIn("MATURE / STEAM FLAG: GORE OR SEXUAL CONTENT", review.PAGE.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

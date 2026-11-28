@@ -77,6 +77,11 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - `data/hook_bank.json` (`hookbank.py`): use count at render; approval / rejection counts and a note from dashboard
   actions, once per clip. Reject / Mark Uploaded still delete the folder at once.
 
+## Steam mature flag
+- A news Short about a game Steam flags for gore or sexual content (descriptors 1-4) is NOT skipped (the user's choice):
+  it renders as normal and the dashboard shows `MATURE / STEAM FLAG: GORE OR SEXUAL CONTENT` and asks again on Approve.
+  Steam trailers stay excluded for descriptors 2-4. Games not on Steam are never tagged.
+
 ## Batch mode and dense Shorts
 - `banger12.bat` (`news --all-niches --count 12 --min-videos 12 --min-photos 22 --no-promo`, `batch.py`): up to 12
   Shorts over every watchlist niche, strict round-robin, at most ceil(count / niches) per niche (3 of 12), even if that

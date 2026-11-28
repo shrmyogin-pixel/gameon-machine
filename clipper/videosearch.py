@@ -35,6 +35,7 @@ MIN_MOTION = 4.0                   # mean pixel change between samples; below th
 EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 ALLOWED_HOSTS = (".steamstatic.com", "upload.wikimedia.org")
 BLOCKED_DESCRIPTORS = {2, 3, 4}    # Steam: frequent violence / gore, adult-only sexual content, frequent nudity
+WARN_DESCRIPTORS = BLOCKED_DESCRIPTORS | {1}      # dashboard warning: also "some nudity or sexual content"
 STEAM = "https://store.steampowered.com/api/"
 TRAILERS_PER_GAME = 4
 YT_RESULTS, YT_DOWNLOADS = 8, 4    # search hits looked at per query; videos downloaded per Short
@@ -165,18 +166,46 @@ def download_youtube(url: str, folder: Path) -> Path | None:
         return None
 
 
+def steam_app(topic: str, timeout: float) -> tuple[int, str, dict] | None:
+    """(app id, store name, details) of the game itself, None when the store has no such game. Raises on a failed lookup."""
+    found = _json(STEAM + "storesearch/?" + urllib.parse.urlencode({"term": topic, "l": "english", "cc": "US"}), timeout)
+    app = next((i for i in found.get("items", []) if i.get("type") == "app" and same_game(topic, i.get("name", ""))), None)
+    if not app:
+        return None
+    appid = int(app["id"])
+    return appid, app["name"], _json(STEAM + f"appdetails?appids={appid}&l=english&cc=US", timeout)[str(appid)]["data"]
+
+
+def _descriptors(data: dict) -> set:
+    return set((data.get("content_descriptors") or {}).get("ids") or [])
+
+
+def mature_flag(subjects: list[str], timeout: float = 15.0) -> str:
+    """For the review dashboard only (nothing is skipped): the story's games Steam flags for gore or sexual content,
+    comma separated. '' = none flagged (or not sold on Steam); 'unchecked' = Steam could not be asked."""
+    flagged, failed = [], False
+    for topic in [t.strip() for t in subjects if t and topic_words(t)]:
+        try:
+            app = steam_app(topic, timeout)
+        except Exception as exc:
+            log.info("steam flags: lookup failed for %r (%s: %s)", topic, type(exc).__name__, str(exc)[:100])
+            failed = True
+            continue
+        if app and WARN_DESCRIPTORS & _descriptors(app[2]):
+            flagged.append(app[1])
+    return ", ".join(dict.fromkeys(flagged)) or ("unchecked" if failed else "")
+
+
 def steam_sources(topic: str, timeout: float) -> list[dict]:
     try:
-        found = _json(STEAM + "storesearch/?" + urllib.parse.urlencode({"term": topic, "l": "english", "cc": "US"}), timeout)
-        app = next((i for i in found.get("items", []) if i.get("type") == "app" and same_game(topic, i.get("name", ""))), None)
+        app = steam_app(topic, timeout)
         if not app:
             return []
-        appid = int(app["id"])
-        data = _json(STEAM + f"appdetails?appids={appid}&l=english&cc=US", timeout)[str(appid)]["data"]
-        if BLOCKED_DESCRIPTORS & set((data.get("content_descriptors") or {}).get("ids") or []):
-            log.info("video search: %s trailers skipped (store marks gore or sexual content)", app["name"])
+        appid, name, data = app
+        if BLOCKED_DESCRIPTORS & _descriptors(data):
+            log.info("video search: %s trailers skipped (store marks gore or sexual content)", name)
             return []
-        credit = (f"Video: official {data.get('name', app['name'])} trailers (c) "
+        credit = (f"Video: official {data.get('name', name)} trailers (c) "
                   f"{', '.join(data.get('publishers') or ['the publisher'])}, https://store.steampowered.com/app/{appid}/")
         return [{"url": m["hls_h264"], "source": "steam", "credit": credit}
                 for m in (data.get("movies") or [])[:TRAILERS_PER_GAME] if _allowed(m.get("hls_h264", ""))]

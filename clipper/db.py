@@ -90,6 +90,7 @@ EXTRA_COLUMNS = {
     "qa_warnings": "TEXT",        # JSON list from the post-render QA (qa.py); NULL = not checked, [] = passed
     "hook_id": "TEXT",            # hook_bank.json pattern the Short's hook follows
     "hook_feedback": "TEXT",      # what the dashboard has counted for it: approved | rejected | NULL
+    "mature_flag": "TEXT",        # games Steam flags for gore / sexual content; '' none, 'unchecked', NULL never looked up
 }
 ASSIGN_TARGETS = ("youtube", "other")
 
@@ -211,6 +212,11 @@ def set_qa(db_path: Path, folder: str, warnings: list[str]) -> None:
     with connect(db_path) as conn:
         conn.execute("UPDATE clips SET qa_warnings = ?, updated_at = datetime('now') WHERE folder = ?",
                      (json.dumps(warnings, ensure_ascii=False), folder))
+
+
+def set_mature_flag(db_path: Path, folder: str, flag: str) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET mature_flag = ?, updated_at = datetime('now') WHERE folder = ?", (flag, folder))
 
 
 def set_hook(db_path: Path, folder: str, hook_id: str, feedback: str | None = None) -> None:
