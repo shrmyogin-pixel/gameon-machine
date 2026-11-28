@@ -27,7 +27,8 @@ log = logging.getLogger("clipper")
 
 WATCHLIST_FILE = PROJECT_ROOT / "config" / "watchlist.json"
 CACHE_NAME = "watchlist_cache.json"
-BUCKETS = ("upcoming_games", "trailers", "upcoming_tech", "gta_6", "creators")
+BUCKETS = ("upcoming_games", "trailers", "upcoming_tech", "gta_6", "creators", "free_games", "secrets_glitches",
+           "game_updates")
 MODE_BUCKETS = {None: BUCKETS, "gta": ("gta_6",), "creators": ("creators",), "tech": ("upcoming_tech",), "promo": ()}
 SEARCH_URL = "https://www.youtube.com/results?search_query={q}&sp=EgQIAxAB"      # filter: this week, videos
 DEFAULTS = {"mode": "metadata_only", "max_items_per_source": 12, "cache_ttl_minutes": 360, "request_delay_seconds": 1.5,
@@ -39,6 +40,10 @@ GTA6 = re.compile(r"\b(?:gta|grand theft auto)[ :-]*(?:6|vi)\b", re.I)
 TRAILER = re.compile(r"\b(trailers?|teaser|gameplay (?:reveal|showcase|deep[- ]dive)|first look)\b", re.I)
 RELEASE = re.compile(r"\b(release date|release window|launch(?:es|ing)? (?:date|on|in)|delay(?:s|ed)?|coming (?:to|in|on)|"
                      r"arrives? (?:on|in))\b", re.I)
+FREE_GAME = re.compile(r"\b(free[- ]to[- ]keep|free games?|free (?:on|via|from) (?:steam|epic|gog|prime|the epic)|"
+                       r"(?:is|are|now) free (?:on|to keep|to claim)|claim .{0,40}\bfor free|epic games store .{0,40}\bfree)\b", re.I)
+SECRET = re.compile(r"\b(easter eggs?|secrets?|hidden|glitch(?:es)?|exploits?|bug(?![ -]?fix))\b", re.I)
+UPDATE = re.compile(r"\b(patch(?: notes)?|updates?|hotfix|new season|season \d+|expansion|dlc|roadmap)\b", re.I)
 # words that do not say which game or event a title is about
 MATCH_COMMON = set(gta.COMMON) | set(topics.GENERIC) | set(
     "official gameplay trailer reveal upcoming announcement details breakdown world first look".split())
@@ -188,6 +193,8 @@ def bucket_of(title: str, summary: str = "", only: str | None = None) -> str | N
         return "creators"
     if only == "tech":
         return "upcoming_tech"
+    if FREE_GAME.search(title):
+        return "free_games"
     if TRAILER.search(title):
         return "trailers"
     if RELEASE.search(title):
@@ -196,6 +203,10 @@ def bucket_of(title: str, summary: str = "", only: str | None = None) -> str | N
         return "creators"
     if tech.is_story(title, summary):
         return "upcoming_tech"
+    if SECRET.search(title):
+        return "secrets_glitches"
+    if UPDATE.search(title):
+        return "game_updates"
     return None
 
 

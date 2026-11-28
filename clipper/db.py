@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS used_pictures (
     dhash      TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS used_clips (
+    ahash      TEXT NOT NULL,                 -- fingerprint of one frame of a video clip a Short showed, as hex
+    dhash      TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS news_topics (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     topics     TEXT NOT NULL,                 -- comma-separated topic keys of one made Short ('gta', 'elden ring')
@@ -479,6 +484,20 @@ def recent_used_pictures(db_path: Path, since_utc: str) -> list[tuple[int, int]]
     with connect(db_path) as conn:
         return [(int(r["ahash"], 16), int(r["dhash"], 16)) for r in conn.execute(
             "SELECT ahash, dhash FROM used_pictures WHERE created_at >= ?", (since_utc,))]
+
+
+def add_used_clips(db_path: Path, prints: list[tuple[int, int]]) -> None:
+    """Remember the footage a finished news Short showed (kept even after the clip is deleted)."""
+    init_db(db_path)
+    with connect(db_path) as conn:
+        conn.executemany("INSERT INTO used_clips (ahash, dhash) VALUES (?, ?)", [(f"{a:x}", f"{d:x}") for a, d in prints])
+
+
+def recent_used_clips(db_path: Path, since_utc: str) -> list[tuple[int, int]]:
+    init_db(db_path)
+    with connect(db_path) as conn:
+        return [(int(r["ahash"], 16), int(r["dhash"], 16)) for r in conn.execute(
+            "SELECT ahash, dhash FROM used_clips WHERE created_at >= ?", (since_utc,))]
 
 
 def news_urls_seen(db_path: Path, promo: bool = False) -> set[str]:

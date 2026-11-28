@@ -69,14 +69,33 @@ class BatchRuleTests(unittest.TestCase):
 
     def test_round_robin_and_a_flood_of_gta_stories_cannot_dominate(self):
         names = list(watchlist.BUCKETS)
+        self.assertEqual(len(names), 8)
         made, res = self.run_with({n: 40 if n == "gta_6" else 6 for n in names})
-        self.assertEqual(made, names + names + names[:2])                  # one each per turn
+        self.assertEqual(made, names + names[:4])                         # one each per turn
         self.assertEqual(res.note, "")
-        made, res = self.run_with({"upcoming_games": 1, "trailers": 0, "upcoming_tech": 1, "gta_6": 40, "creators": 1})
-        self.assertEqual(made.count("gta_6"), 3)                          # short niches are not filled with GTA
-        self.assertIn("6 of 12", res.note)
         made, _ = self.run_with({n: 5 for n in names}, count=3)
         self.assertEqual(made, names[:3])
+
+    def test_short_niches_pass_their_places_on_until_the_batch_is_full(self):
+        names = list(watchlist.BUCKETS)
+        made, res = self.run_with({n: 0 if n in ("trailers", "creators", "free_games") else 40 for n in names})
+        self.assertEqual((len(made), res.note), (12, ""))
+        self.assertLessEqual(made.count("gta_6"), 3)
+        counts = [made.count(n) for n in names if made.count(n) and n != "gta_6"]
+        self.assertLessEqual(max(counts) - min(counts), 1)                # spread evenly
+        made, res = self.run_with({n: {"gta_6": 40, "game_updates": 30}.get(n, 0) for n in names})
+        self.assertEqual((made.count("gta_6"), made.count("game_updates")), (3, 9))
+        made, res = self.run_with({n: {"gta_6": 40, "creators": 1}.get(n, 0) for n in names})
+        self.assertEqual(made.count("gta_6"), 3)                          # never filled up with GTA
+        self.assertIn("4 of 12", res.note)
+
+    def test_the_new_categories_are_recognised(self):
+        for title, bucket in (("Alan Wake 2 is free to keep on Epic this week", "free_games"),
+                              ("Players find a hidden room in Hades 3", "secrets_glitches"),
+                              ("No Man's Sky update adds new ships", "game_updates"),
+                              ("GTA 6 easter egg found on a rooftop", "gta_6"),
+                              ("Free, open-source upscaler rivals DLSS", "upcoming_tech")):
+            self.assertEqual(watchlist.bucket_of(title), bucket, title)
 
     def test_gta_6_cannot_slip_in_through_another_niche(self):
         self.assertTrue(batch.Batch().repeats(pick("A console tech story", "GTA 6"), "upcoming_tech"))

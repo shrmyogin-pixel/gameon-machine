@@ -714,7 +714,7 @@ def collect_clips(cfg: Config, pick: Pick, folder: Path, seconds: float, need: i
                                        need or clips_needed(seconds, int(cfg.news.get("videos_max", 15))),
                                        float(cfg.news["image_timeout"]),
                                        kind=pick.bucket, exclude=pick.story.link,
-                                       youtube=bool(cfg.news.get("youtube", True)))
+                                       youtube=bool(cfg.news.get("youtube", True)), seen=_recently_used_clips(cfg))
     except Exception:
         log.exception("news: video hunt failed (using pictures)")
         return []
@@ -774,6 +774,19 @@ def collect_dense(cfg: Config, pick: Pick, folder: Path, seconds: float) -> tupl
     shown = (visuals + frames)[:have]
     used = {f["url"] for f in shown if f["kind"] == "frame"}
     return "photo", [c for c in clips if c["url"] in used], [v for v in shown]
+
+
+def _recently_used_clips(cfg: Config) -> list:
+    """Fingerprints of the footage shown in the last [news] video_repeat_hours, so two Shorts never share a shot."""
+    hours = float(cfg.news.get("video_repeat_hours", 48))
+    if hours <= 0:
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        return db.recent_used_clips(cfg.database, since)
+    except Exception:
+        log.exception("news: could not read the used footage (ignored)")
+        return []
 
 
 def _recently_used_pictures(cfg: Config) -> list:
@@ -921,6 +934,12 @@ def make_short(cfg: Config, pick: Pick) -> Path:
             pass
         except Exception:
             log.exception("[%s] could not remember its pictures (ignored)", folder.name)
+        try:
+            if not in_promo and clips:
+                from .videosearch import window_prints
+                db.add_used_clips(cfg.database, [p for c in clips for p in window_prints(c["file"])])
+        except Exception:
+            log.exception("[%s] could not remember its footage (ignored)", folder.name)
         try:
             from . import topics
             if not in_promo:                                 # promo never blocks a game for the other commands

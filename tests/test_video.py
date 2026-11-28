@@ -79,5 +79,52 @@ class PromoTests(unittest.TestCase):
         self.assertTrue(callable(lifecycle.record_seen))
 
 
+class ReuseTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from clipper.config import load_config
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.cfg = load_config()
+        self.cfg.data_dir, self.cfg.database = self.root, self.root / "c.sqlite"
+
+    def video(self, name, source, seconds=5):
+        import shutil
+        import subprocess
+        out = self.root / name
+        subprocess.run([shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                        f"{source}=s=1280x720:r=30:d={seconds}", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)], check=True)
+        return out
+
+    def test_the_same_footage_is_recognised_and_other_footage_is_not(self):
+        from clipper import videosearch
+        first = videosearch.window_prints(self.video("a.mp4", "testsrc2"))
+        again = videosearch.window_prints(self.video("b.mp4", "testsrc2"))
+        other = videosearch.window_prints(self.video("c.mp4", "smptebars"))
+        self.assertTrue(first and other)
+        self.assertTrue(videosearch.shown_before(again, first))
+        self.assertFalse(videosearch.shown_before(other, first))
+        self.assertFalse(videosearch.shown_before(again, []))
+        self.assertEqual(videosearch.window_prints(self.root / "no.mp4"), [])
+
+    def test_used_footage_is_remembered_and_expires(self):
+        from clipper import db, news
+        db.add_used_clips(self.cfg.database, [(1, 2)])
+        self.assertEqual(news._recently_used_clips(self.cfg), [(1, 2)])
+        self.cfg.raw = {**self.cfg.raw, "news": {**self.cfg.raw["news"], "video_repeat_hours": 0}}
+        self.assertEqual(news._recently_used_clips(self.cfg), [])
+
+    def test_a_source_that_was_already_shown_gives_no_clip(self):
+        from clipper import videosearch
+        source = self.video("own.mp4", "testsrc2", seconds=30)
+        seen = [p for s in videosearch.start_times(30, 16) for p in videosearch.window_prints(source, s)]
+        video = {"url": str(source), "source": "own", "credit": "c"}
+        folder = self.root / "short"
+        folder.mkdir()
+        self.assertEqual(videosearch.clips_from(self.cfg, video, folder, 4, 1, seen=seen), [])
+
+
 if __name__ == "__main__":
     unittest.main()

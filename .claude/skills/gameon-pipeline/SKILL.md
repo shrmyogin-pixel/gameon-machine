@@ -34,6 +34,8 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - Never a thumbnail of someone else's video or stream (`newsimage.is_video_thumbnail`).
 - Never an outlet's own promo graphic (subscribe / follow / newsletter banners).
 - A Short avoids pictures that Shorts of the last 48 hours showed, reusing one only to avoid having too few.
+- A Short never shows video footage that Shorts of the last 48 hours showed (`[news] video_repeat_hours`,
+  `videosearch.shown_before`): it takes other windows or sources, then pictures, and is skipped if still short.
 - Hooks: curiosity gap or concrete stake, never the headline read back, no vague "Nobody expected this" teaser,
   and the first script sentence adds a new fact (`hookscore.py`, `news.validate_reply`).
 
@@ -84,8 +86,9 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 
 ## Batch mode and dense Shorts
 - `banger12.bat` (`news --all-niches --count 12 --min-videos 12 --min-photos 22 --no-promo`, `batch.py`): up to 12
-  Shorts over every watchlist niche, strict round-robin, at most ceil(count / niches) per niche (3 of 12), even if that
-  leaves the batch short. No repeated story or game (GTA 6: angle), no repeated hook opening, one pattern at
+  Shorts over every watchlist niche (eight, with free_games, secrets_glitches, game_updates), round-robin up to
+  ceil(count / niches) each; a short niche's places pass to the others, one at a time, until the batch is full. GTA 6 never
+  takes more than one above the first cap. No repeated story or game (GTA 6: angle), no repeated hook opening, one pattern at
   most twice. Never promo, deal or sponsored items; no trend Shorts.
 - Dense Shorts (this mode, or `--min-videos` / `--min-photos`) need 10+ video cuts, or 20+ distinct pictures / clip
   frames; otherwise the story is skipped. The flags say how many to try for. Only here, cuts are shorter than the usual

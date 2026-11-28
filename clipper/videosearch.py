@@ -272,6 +272,31 @@ def motion_score(path: Path, start: float = 0.0) -> float:
     return float(np.mean([np.abs(a - b).mean() for a, b in zip(frames, frames[1:])]))
 
 
+def window_prints(path: Path, start: float = 0.0) -> list[tuple[int, int]]:
+    """Fingerprints of up to three frames of the clip that starts at `start`; dark or flat frames say nothing and are
+    left out (they would all look alike)."""
+    import cv2
+    cap = cv2.VideoCapture(str(path))
+    try:
+        out = []
+        for offset in (0.5, 2.0, 3.5):
+            cap.set(cv2.CAP_PROP_POS_MSEC, (start + offset) * 1000)
+            ok, img = cap.read()
+            if ok and cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).std() >= 18:
+                out.append(newsimage.fingerprint(img))
+        return out
+    finally:
+        cap.release()
+
+
+def shown_before(prints: list, seen: list) -> bool:
+    """Two of a clip's frames (or its only usable one) look like frames an earlier Short showed."""
+    if not prints or not seen:
+        return False
+    matches = sum(any(newsimage.is_duplicate(p, s) for s in seen) for p in prints)
+    return matches >= min(2, len(prints))
+
+
 def best_windows(scored: list[tuple[float, float]], n: int) -> list[float]:
     """[(start, motion)] -> the starts of the `n` liveliest windows, in playing order; still ones are never used."""
     top = sorted((s for s in scored if s[1] >= MIN_MOTION), key=lambda s: -s[1])[:max(n, 0)]
@@ -302,8 +327,9 @@ def _remote_duration(cfg, url: str) -> float:
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
 
 
-def clips_from(cfg, video: dict, folder: Path, want: int, first_n: int) -> list[dict]:
-    """Up to `want` lively clips from one source video, saved as folder/news_video_<n>.mp4."""
+def clips_from(cfg, video: dict, folder: Path, want: int, first_n: int, seen: list | None = None) -> list[dict]:
+    """Up to `want` lively clips from one source video, saved as folder/news_video_<n>.mp4. Windows that look like
+    footage in `seen` (recent Shorts) are never used."""
     local: Path | None = None
     try:
         if video["source"] == "own":
@@ -316,12 +342,16 @@ def clips_from(cfg, video: dict, folder: Path, want: int, first_n: int) -> list[
         duration = probe_duration(cfg, local) if local else _remote_duration(cfg, src)
         made: list[tuple[float, float, Path]] = []        # (start, motion, trial file)
         if local:                                          # score first, cut only the best
-            starts = best_windows([(s, motion_score(local, s)) for s in start_times(duration, 16)], want)
+            windows = [s for s in start_times(duration, 16) if not (seen and shown_before(window_prints(local, s), seen))]
+            starts = best_windows([(s, motion_score(local, s)) for s in windows], want)
         else:                                              # a stream: cut a few more than needed, then keep the best
             starts = start_times(duration, want + 2)
         for i, start in enumerate(starts):
             trial = folder / f"trial_{i}.mp4"
             if _cut(cfg, src, start, trial):
+                if not local and seen and shown_before(window_prints(trial), seen):    # a stream: checked once cut
+                    trial.unlink(missing_ok=True)
+                    continue
                 made.append((start, motion_score(trial), trial))
         keep = set(best_windows([(s, m) for s, m, _ in made], want))
         out = []
@@ -343,22 +373,25 @@ def clips_from(cfg, video: dict, folder: Path, want: int, first_n: int) -> list[
 
 
 def fetch_clips(cfg, subjects: list[str], folder: Path, own_root: Path, need: int = 5, timeout: float = 15.0,
-                kind: str = "", exclude: str = "", youtube: bool = True) -> list[dict]:
+                kind: str = "", exclude: str = "", youtube: bool = True, seen: list | None = None) -> list[dict]:
     """Up to `need` clips for the first of `subjects` that has footage. A generic subject ("Steam", "PlayStation") is
-    not searched: it would match anything. `exclude` is a URL whose video must not be used.
+    not searched: it would match anything. `exclude` is a URL whose video must not be used; `seen` is footage recent
+    Shorts showed (see window_prints), which is skipped.
 
     -> [{'file', 'url', 'source', 'credit'}]. Never raises."""
+    downloads = YT_DOWNLOADS + (3 if seen else 0)          # some sources may have nothing new left
     for topic in [t.strip() for t in subjects if t and topic_words(t)]:
         kept: list[dict] = []
         sources = [lambda: own_sources(topic, own_root),
-                   lambda: youtube_sources(topic, kind, exclude)[:YT_DOWNLOADS] if youtube else [],
+                   lambda: youtube_sources(topic, kind, exclude)[:downloads] if youtube else [],
                    lambda: steam_sources(topic, timeout),
                    lambda: commons_sources(topic, timeout)]
         for find in sources:
             for video in find():
                 if len(kept) >= need:
                     return kept
-                kept += clips_from(cfg, video, folder, min(PER_VIDEO, need - len(kept)), len(kept) + 1)
+                kept += clips_from(cfg, video, folder, min(PER_VIDEO, need - len(kept)), len(kept) + 1,
+                                   **({"seen": seen} if seen else {}))
         if kept:
             return kept
     return []
