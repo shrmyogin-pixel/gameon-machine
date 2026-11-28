@@ -137,6 +137,24 @@ def official_names(cfg, topic: str, timeout: float) -> set:
     return {k for k in (channel_key(str(n)) for n in names) if k}
 
 
+TECH_KINDS = ("tech", "pick")
+# a company alone is not a product: "Lenovo" would give any laptop for a story about one handheld
+MAKERS = set("""nvidia amd intel lenovo asus acer msi dell alienware razer corsair logitech steelseries hyperx sony
+microsoft samsung lg apple google meta qualcomm gigabyte valve""".split())
+PLATFORMS = set("playstation xbox nintendo steam pc windows android".split())
+
+
+def product_words(subject: str) -> list[str]:
+    """The words a video title must contain to be about this product; [] when the subject is only a company or platform."""
+    words = [w for w in _name(subject).split() if w not in MAKERS]
+    return words if any(w not in PLATFORMS for w in words) else []
+
+
+def names_product(subject: str, title: str) -> bool:
+    words, text = product_words(subject), _name(title)
+    return bool(words) and all(re.search(rf"\b{re.escape(w)}\b", text) for w in words)
+
+
 def usable_hit(topic: str, entry: dict, exclude: str = "") -> bool:
     title, channel = str(entry.get("title") or ""), str(entry.get("channel") or "")
     duration = entry.get("duration") or 0
@@ -176,7 +194,9 @@ def youtube_sources(topic: str, kind: str, exclude: str = "", official: set | No
             log.info("video search: youtube failed for %r (%s: %s)", query, type(exc).__name__, str(exc)[:100])
             continue
         for entry in (found or {}).get("entries") or []:
-            if entry and usable_hit(topic, entry, exclude) and (official is None or is_official(entry, topic, official, kind)):
+            if (entry and usable_hit(topic, entry, exclude)
+                    and (official is None or is_official(entry, topic, official, kind))
+                    and (kind not in TECH_KINDS or names_product(topic, str(entry.get("title") or "")))):
                 hits.setdefault(entry["id"], entry)
         if len(hits) >= YT_DOWNLOADS * 2:
             break
@@ -416,6 +436,8 @@ def fetch_clips(cfg, subjects: list[str], folder: Path, own_root: Path, need: in
     downloads = YT_DOWNLOADS + (3 if seen else 0)          # some sources may have nothing new left
     official_only = bool(cfg is not None and cfg.news.get("official_only", True))
     for topic in [t.strip() for t in subjects if t and topic_words(t)]:
+        if kind in TECH_KINDS and not product_words(topic):
+            continue
         kept: list[dict] = []
         sources = [lambda: own_sources(topic, own_root),
                    lambda: youtube_sources(topic, kind, exclude, **({"official": official_names(cfg, topic, timeout)}

@@ -45,6 +45,32 @@ class LockedPipelineRules(unittest.TestCase):
         self.assertIn("tiny publisher", asked["official"])
         commons.assert_not_called()
 
+    def test_tech_footage_must_show_the_product_not_just_the_company(self):
+        from types import SimpleNamespace as NS
+        from clipper import videosearch as v
+        for company in ("Lenovo", "Nvidia", "Steam", "PlayStation"):
+            self.assertEqual(v.product_words(company), [], company)
+        self.assertTrue(v.names_product("Lenovo Legion Go Beam", "Introducing the Legion Go Beam"))
+        for title in ("Lenovo Yoga Book 9i", "Lenovo Center Meet-up", "Legion Go S trailer"):
+            self.assertFalse(v.names_product("Legion Go Beam", title), title)
+        self.assertTrue(v.names_product("Steam Deck", "Steam Deck: the new model"))
+        self.assertEqual(news.picture_topic(NS(bucket="tech", subjects=["Lenovo", "Legion Go Beam"])), "Legion Go Beam")
+        self.assertEqual(news.picture_topic(NS(bucket="update", subjects=["Warframe", "Tau"])), "Warframe")
+
+    def test_captions_spell_the_script_not_the_transcription(self):
+        script = "PCGamesN's writer sounds hopeful - about Tau."
+        heard = [[0.0, 0.5, "Gamison's"], [0.5, 0.8, "writer"], [0.8, 1.1, "sounds"], [1.1, 1.5, "hopeful"],
+                 [1.6, 1.9, "about"], [1.9, 2.3, "Tao."]]
+        out = news.spell_from_script(heard, script)
+        self.assertEqual(" ".join(w[2] for w in out), script)
+        self.assertEqual(out[1][:2], [0.5, 0.8])
+        for words in (heard[1:], heard[:2] + heard[3:], heard[:-1], [[0, 3, "x"]],
+                      heard[:2] + [[0.8, 0.8, "um"]] + heard[2:]):
+            out = news.spell_from_script(words, script)
+            self.assertEqual(" ".join(w[2] for w in out), script, words)
+            self.assertTrue(all(a <= b for a, b, _ in out))
+            self.assertTrue(all(x[0] <= y[0] for x, y in zip(out, out[1:])), out)
+
     def test_each_bucket_has_its_pill(self):
         self.assertEqual([badge_label(b, subject="GTA 6") for b in BUCKETS],
                          ["GTA 6", "FREE GAME", "PATCH UPDATE", "WILD BUG", "CREATOR NEWS", "GAMING TECH"])

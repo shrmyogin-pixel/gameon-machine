@@ -13,6 +13,7 @@ One story failing never stops the next. The GROQ_API_KEY is only read, never pri
 from __future__ import annotations
 
 import asyncio
+import difflib
 import html
 import json
 import logging
@@ -615,6 +616,60 @@ def estimate_words(script: str, duration: float) -> list[list]:
     return out
 
 
+def _plain(word: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", word.lower().replace("\u2019", "'"))
+
+
+def spell_from_script(heard: list[list], script: str) -> list[list]:
+    """The script's own words with the transcription's timing, so a misheard name never reaches the captions.
+
+    Words both agree on keep their timing; a stretch that differs shares the time the transcription gave it."""
+    tokens: list[str] = []
+    for t in script.split():
+        if _plain(t) or not tokens:
+            tokens.append(t)
+        else:
+            tokens[-1] += f" {t}"                            # a lone dash or symbol stays with the word before it
+    if not heard or not tokens:
+        return heard
+    matcher = difflib.SequenceMatcher(a=[_plain(t) for t in tokens], b=[_plain(w[2]) for w in heard], autojunk=False)
+    out: list[list] = []
+    blocks = matcher.get_opcodes()
+    carry: list[str] = []                                    # script words the transcription skipped altogether
+    for tag, i1, i2, j1, j2 in blocks:
+        if tag == "equal":
+            for i, j in zip(range(i1, i2), range(j1, j2)):
+                out.append([heard[j][0], heard[j][1], tokens[i]])
+            continue
+        if i1 == i2:                                         # extra words heard: not in the script, not shown
+            continue
+        if j1 == j2:
+            carry = tokens[i1:i2]
+            # share the time of the neighbouring word with the skipped ones
+            if out:
+                start, end, text = out.pop()
+                group = [text, *carry]
+            elif j2 < len(heard):
+                continue
+            else:
+                group, start, end = carry, heard[-1][0], heard[-1][1]
+            carry = []
+        else:
+            group, start, end = tokens[i1:i2], heard[j1][0], heard[j2 - 1][1]
+        weights = [len(t) + 2 for t in group]
+        t0 = start
+        for token, weight in zip(group, weights):
+            step = (end - start) * weight / sum(weights)
+            out.append([round(t0, 3), round(t0 + step, 3), token])
+            t0 += step
+    if carry:                                                # skipped at the very start: before the first word heard
+        first = out[0]
+        group = [*carry, first[2]]
+        step = (first[1] - first[0]) / len(group)
+        out[0:1] = [[round(first[0] + k * step, 3), round(first[0] + (k + 1) * step, 3), t] for k, t in enumerate(group)]
+    return out
+
+
 def get_words(cfg: Config, audio: Path, script: str, duration: float) -> tuple[list[list], str]:
     """-> (words, 'groq' | 'estimated'). Falls back to estimates when there is no key or Groq fails."""
     key = get_env_key("GROQ_API_KEY")
@@ -627,7 +682,7 @@ def get_words(cfg: Config, audio: Path, script: str, duration: float) -> tuple[l
         if spoken < scripted * 0.7:
             log.warning("news: Groq heard %d words but the script has %d; using estimated timing", spoken, scripted)
             return estimate_words(script, duration), "estimated"
-        return words, "groq"
+        return spell_from_script(words, script), "groq"
     except NewsError as exc:
         log.warning("news: %s; using estimated word timing", exc)
         return estimate_words(script, duration), "estimated"
@@ -763,7 +818,7 @@ def collect_dense(cfg: Config, pick: Pick, folder: Path, seconds: float) -> tupl
     before = cfg.raw["news"]
     cfg.raw["news"] = {**before, "images_min": photos, "images_max": photos, "images_floor": 0}
     try:
-        visuals = collect_visuals(cfg, pick.story, folder, pick.subjects[0] if pick.subjects else None)
+        visuals = collect_visuals(cfg, pick.story, folder, picture_topic(pick))
     finally:
         cfg.raw["news"] = before
     frames = clip_frames(clips, folder, [v["file"] for v in visuals], photos - len(visuals))
@@ -774,6 +829,16 @@ def collect_dense(cfg: Config, pick: Pick, folder: Path, seconds: float) -> tupl
     shown = (visuals + frames)[:have]
     used = {f["url"] for f in shown if f["kind"] == "frame"}
     return "photo", [c for c in clips if c["url"] in used], [v for v in shown]
+
+
+def picture_topic(pick: Pick) -> str | None:
+    """What the picture search looks for: the story's main subject, for a tech story the product rather than its maker."""
+    from .videosearch import TECH_KINDS, product_words
+    if pick.bucket in TECH_KINDS:
+        product = next((s for s in pick.subjects if product_words(s)), None)
+        if product:
+            return product
+    return pick.subjects[0] if pick.subjects else None
 
 
 def _recently_used_clips(cfg: Config) -> list:
@@ -852,7 +917,7 @@ def make_short(cfg: Config, pick: Pick) -> Path:
         else:
             clips = collect_clips(cfg, pick, folder, dur)            # now that the length is known
             try:
-                visuals = collect_visuals(cfg, story, folder, pick.subjects[0] if pick.subjects else None)
+                visuals = collect_visuals(cfg, story, folder, picture_topic(pick))
             except NewsError:
                 if len(clips) < 3:                        # too few pictures only matters without enough video
                     raise

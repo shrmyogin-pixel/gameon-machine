@@ -19,6 +19,7 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - **Captions: layout as in `refs/no change.JPG` (colours changed on request). Do not restyle or move them.**
   Word-by-word, 2-3 words, Impact 100, white with the spoken word in golden yellow #FFD400 (green #3DFF6E for numbers and trigger words),
   black outline and shadow, no glow (hook: same white, gold, black), centred at y=1180; small `Source: <outlet>` line at y=1330.
+  News captions spell the script's words; the transcription only times them (`news.spell_from_script`).
   Code: `render.pop_caption_events`, style `Cap` in `news_render.build_news_ass`.
 - **Category pill: normal solid yellow fill, dark text.** Opaque box (ASS `BorderStyle 3`), fill `&H0000D4FF&`,
   text `&H00141414&`, no glow, no neon, no shadow. `refs/change 1.JPG` shows the old glowing pill: do not go back to it.
@@ -97,6 +98,10 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - Dense Shorts (this mode, or `--min-videos` / `--min-photos`) need 10+ video cuts, or 20+ distinct pictures / clip
   frames; otherwise the story is skipped. The flags say how many to try for. Only here, cuts are shorter than the usual
   3-4 s / 2-2.5 s: video from 2.5 s, pictures from 1.2 s (the user asked for this density). Everything else is unchanged.
+
+## Tech stories
+- Video for a `tech` story must name the product in its title; a company or platform alone ("Lenovo") is not enough
+  (`videosearch.product_words`). The picture search looks for the product too. No product footage = pictures.
 
 ## Promo mode
 - `promo.bat` or `python -m clipper news --topic promo`: deals, discounts, bundles and gear spotlights, pill
