@@ -2,9 +2,10 @@
 
 Sources, in this order, until there are enough clips:
   1. assets/gameplay/<game-slug>/   your own recordings
-  2. YouTube via yt-dlp             official trailers, gameplay, creator clips and reveals from VERIFIED channels only
+  2. YouTube via yt-dlp             VERIFIED channels only; with [news] official_only, only publisher / platform channels
+                                    ([news] official_channels, the game's own channel, or its Steam developer / publisher)
   3. Steam store trailers           the publisher's official promotional videos (public store API, no key)
-  4. Wikimedia Commons              freely licensed videos, credited with author and license
+  4. Wikimedia Commons              freely licensed videos, credited with author and license (not with official_only)
 
 Nothing is signed in to or unlocked: age-restricted, private and live videos are left alone. Source audio is dropped,
 every source is credited, and a downloaded video is deleted as soon as its clips are cut. Everything is best-effort:
@@ -104,6 +105,56 @@ def queries(topic: str, kind: str) -> list[str]:
     return [f"{topic} official trailer", f"{topic} gameplay"]
 
 
+# words a publisher adds to its channel name ("Bethesda Softworks", "Nintendo of America")
+CHANNEL_TAIL = re.compile(r"(?: (?:official|entertainment|studios?|interactive|inc|llc|ltd|co|corporation|softworks|"
+                          r"of america|north america|america|europe|uk|usa|us))+$")
+
+
+def channel_key(name: str) -> str:
+    return CHANNEL_TAIL.sub("", _name(name))
+
+
+def is_official(entry: dict, topic: str, official: set, kind: str = "") -> bool:
+    """The channel belongs to a publisher or platform holder: it is listed (`official`, as channel_key values), or its
+    name is exactly the game's (never assumed for a creator story, where that would be the creator's own channel)."""
+    channel = str(entry.get("channel") or "")
+    if channel_key(channel) in official:
+        return True
+    game = _name(topic)
+    return kind != "creator" and _name(channel) in (game, f"{game} official")
+
+
+def official_names(cfg, topic: str, timeout: float) -> set:
+    """channel_key values that count as official for this topic: the configured list plus the game's Steam developers
+    and publishers."""
+    names = list(cfg.news.get("official_channels", []))
+    try:
+        app = steam_app(topic, timeout)
+        if app:
+            names += [*(app[2].get("developers") or []), *(app[2].get("publishers") or [])]
+    except Exception as exc:
+        log.info("video search: no Steam publisher for %r (%s)", topic, type(exc).__name__)
+    return {k for k in (channel_key(str(n)) for n in names) if k}
+
+
+TECH_KINDS = ("tech", "pick")
+# a company alone is not a product: "Lenovo" would give any laptop for a story about one handheld
+MAKERS = set("""nvidia amd intel lenovo asus acer msi dell alienware razer corsair logitech steelseries hyperx sony
+microsoft samsung lg apple google meta qualcomm gigabyte valve""".split())
+PLATFORMS = set("playstation xbox nintendo steam pc windows android".split())
+
+
+def product_words(subject: str) -> list[str]:
+    """The words a video title must contain to be about this product; [] when the subject is only a company or platform."""
+    words = [w for w in _name(subject).split() if w not in MAKERS]
+    return words if any(w not in PLATFORMS for w in words) else []
+
+
+def names_product(subject: str, title: str) -> bool:
+    words, text = product_words(subject), _name(title)
+    return bool(words) and all(re.search(rf"\b{re.escape(w)}\b", text) for w in words)
+
+
 def usable_hit(topic: str, entry: dict, exclude: str = "") -> bool:
     title, channel = str(entry.get("title") or ""), str(entry.get("channel") or "")
     duration = entry.get("duration") or 0
@@ -131,18 +182,21 @@ def _ydl(options: dict):
                              "socket_timeout": 20, **options})
 
 
-def youtube_sources(topic: str, kind: str, exclude: str = "") -> list[dict]:
-    """Verified-channel search hits, official ones first. [] on any failure."""
+def youtube_sources(topic: str, kind: str, exclude: str = "", official: set | None = None) -> list[dict]:
+    """Verified-channel search hits, official ones first; with `official`, publisher channels only. [] on any failure."""
+    results = YT_RESULTS if official is None else YT_RESULTS * 2      # most hits are not publishers: look further
     hits: dict[str, dict] = {}
     for query in queries(topic, kind):
         try:
             with _ydl({"extract_flat": True}) as ydl:
-                found = ydl.extract_info(f"ytsearch{YT_RESULTS}:{query}", download=False)
+                found = ydl.extract_info(f"ytsearch{results}:{query}", download=False)
         except Exception as exc:
             log.info("video search: youtube failed for %r (%s: %s)", query, type(exc).__name__, str(exc)[:100])
             continue
         for entry in (found or {}).get("entries") or []:
-            if entry and usable_hit(topic, entry, exclude):
+            if (entry and usable_hit(topic, entry, exclude)
+                    and (official is None or is_official(entry, topic, official, kind))
+                    and (kind not in TECH_KINDS or names_product(topic, str(entry.get("title") or "")))):
                 hits.setdefault(entry["id"], entry)
         if len(hits) >= YT_DOWNLOADS * 2:
             break
@@ -272,6 +326,31 @@ def motion_score(path: Path, start: float = 0.0) -> float:
     return float(np.mean([np.abs(a - b).mean() for a, b in zip(frames, frames[1:])]))
 
 
+def window_prints(path: Path, start: float = 0.0) -> list[tuple[int, int]]:
+    """Fingerprints of up to three frames of the clip that starts at `start`; dark or flat frames say nothing and are
+    left out (they would all look alike)."""
+    import cv2
+    cap = cv2.VideoCapture(str(path))
+    try:
+        out = []
+        for offset in (0.5, 2.0, 3.5):
+            cap.set(cv2.CAP_PROP_POS_MSEC, (start + offset) * 1000)
+            ok, img = cap.read()
+            if ok and cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).std() >= 18:
+                out.append(newsimage.fingerprint(img))
+        return out
+    finally:
+        cap.release()
+
+
+def shown_before(prints: list, seen: list) -> bool:
+    """Two of a clip's frames (or its only usable one) look like frames an earlier Short showed."""
+    if not prints or not seen:
+        return False
+    matches = sum(any(newsimage.is_duplicate(p, s) for s in seen) for p in prints)
+    return matches >= min(2, len(prints))
+
+
 def best_windows(scored: list[tuple[float, float]], n: int) -> list[float]:
     """[(start, motion)] -> the starts of the `n` liveliest windows, in playing order; still ones are never used."""
     top = sorted((s for s in scored if s[1] >= MIN_MOTION), key=lambda s: -s[1])[:max(n, 0)]
@@ -302,8 +381,9 @@ def _remote_duration(cfg, url: str) -> float:
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])
 
 
-def clips_from(cfg, video: dict, folder: Path, want: int, first_n: int) -> list[dict]:
-    """Up to `want` lively clips from one source video, saved as folder/news_video_<n>.mp4."""
+def clips_from(cfg, video: dict, folder: Path, want: int, first_n: int, seen: list | None = None) -> list[dict]:
+    """Up to `want` lively clips from one source video, saved as folder/news_video_<n>.mp4. Windows that look like
+    footage in `seen` (recent Shorts) are never used."""
     local: Path | None = None
     try:
         if video["source"] == "own":
@@ -316,12 +396,16 @@ def clips_from(cfg, video: dict, folder: Path, want: int, first_n: int) -> list[
         duration = probe_duration(cfg, local) if local else _remote_duration(cfg, src)
         made: list[tuple[float, float, Path]] = []        # (start, motion, trial file)
         if local:                                          # score first, cut only the best
-            starts = best_windows([(s, motion_score(local, s)) for s in start_times(duration, 16)], want)
+            windows = [s for s in start_times(duration, 16) if not (seen and shown_before(window_prints(local, s), seen))]
+            starts = best_windows([(s, motion_score(local, s)) for s in windows], want)
         else:                                              # a stream: cut a few more than needed, then keep the best
             starts = start_times(duration, want + 2)
         for i, start in enumerate(starts):
             trial = folder / f"trial_{i}.mp4"
             if _cut(cfg, src, start, trial):
+                if not local and seen and shown_before(window_prints(trial), seen):    # a stream: checked once cut
+                    trial.unlink(missing_ok=True)
+                    continue
                 made.append((start, motion_score(trial), trial))
         keep = set(best_windows([(s, m) for s, m, _ in made], want))
         out = []
@@ -343,22 +427,29 @@ def clips_from(cfg, video: dict, folder: Path, want: int, first_n: int) -> list[
 
 
 def fetch_clips(cfg, subjects: list[str], folder: Path, own_root: Path, need: int = 5, timeout: float = 15.0,
-                kind: str = "", exclude: str = "", youtube: bool = True) -> list[dict]:
+                kind: str = "", exclude: str = "", youtube: bool = True, seen: list | None = None) -> list[dict]:
     """Up to `need` clips for the first of `subjects` that has footage. A generic subject ("Steam", "PlayStation") is
-    not searched: it would match anything. `exclude` is a URL whose video must not be used.
+    not searched: it would match anything. `exclude` is a URL whose video must not be used; `seen` is footage recent
+    Shorts showed (see window_prints), which is skipped.
 
     -> [{'file', 'url', 'source', 'credit'}]. Never raises."""
+    downloads = YT_DOWNLOADS + (3 if seen else 0)          # some sources may have nothing new left
+    official_only = bool(cfg is not None and cfg.news.get("official_only", True))
     for topic in [t.strip() for t in subjects if t and topic_words(t)]:
+        if kind in TECH_KINDS and not product_words(topic):
+            continue
         kept: list[dict] = []
         sources = [lambda: own_sources(topic, own_root),
-                   lambda: youtube_sources(topic, kind, exclude)[:YT_DOWNLOADS] if youtube else [],
+                   lambda: youtube_sources(topic, kind, exclude, **({"official": official_names(cfg, topic, timeout)}
+                                                           if official_only else {}))[:downloads] if youtube else [],
                    lambda: steam_sources(topic, timeout),
-                   lambda: commons_sources(topic, timeout)]
+                   lambda: [] if official_only else commons_sources(topic, timeout)]
         for find in sources:
             for video in find():
                 if len(kept) >= need:
                     return kept
-                kept += clips_from(cfg, video, folder, min(PER_VIDEO, need - len(kept)), len(kept) + 1)
+                kept += clips_from(cfg, video, folder, min(PER_VIDEO, need - len(kept)), len(kept) + 1,
+                                   **({"seen": seen} if seen else {}))
         if kept:
             return kept
     return []

@@ -83,6 +83,33 @@
         "query": "gaming creator marathon world record milestone",
         "badge_hint": "CREATOR NEWS"
       }
+    ],
+    "free_games": [
+      {
+        "id": "fg_search",
+        "name": "Free Games Search",
+        "type": "search_query",
+        "query": "free game this week steam epic games store",
+        "badge_hint": "FREE GAME"
+      }
+    ],
+    "secrets_glitches": [
+      {
+        "id": "sg_search",
+        "name": "Easter Eggs and Glitches Search",
+        "type": "search_query",
+        "query": "new game easter egg secret glitch found",
+        "badge_hint": "WILD BUG"
+      }
+    ],
+    "game_updates": [
+      {
+        "id": "gu_search",
+        "name": "Game Updates Search",
+        "type": "search_query",
+        "query": "new game update patch notes explained",
+        "badge_hint": "PATCH UPDATE"
+      }
     ]
   }
 }

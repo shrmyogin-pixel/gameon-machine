@@ -1,8 +1,8 @@
 """`news --all-niches` (banger12.bat): up to 12 Shorts in one run, spread over the niches of config/watchlist.json.
 
-Selection is strict round-robin: one Short from each niche in turn, never more than ceil(count / niches) from one niche
-(3 in a batch of 12), however many watched or fresh stories it has. A niche that runs short is made up for by the others
-only up to that cap, so a batch can come out smaller than asked. Each niche is written in its own Claude call. Across the whole batch there are no two Shorts on one story or game (GTA 6:
+Selection is round-robin: one Short from each niche in turn, up to ceil(count / niches) each. When niches run short,
+their places pass to the next ones, the cap rising by one at a time until the batch is full; GTA 6 may only ever take one
+more than the first cap, so it cannot take over. Each niche is written in its own Claude call. Across the whole batch there are no two Shorts on one story or game (GTA 6:
 no two on one angle), no two hooks that open the same way, and a hook-bank pattern is followed at most PATTERN_MAX
 times. Every Short is dense (see news.collect_dense). Same source check, QA, queue and manual review as every news run;
 never promo or affiliate items, and nothing is uploaded (autopost = false).
@@ -20,13 +20,16 @@ from .hookscore import names_subject, opener_of, restates_hook
 log = logging.getLogger("clipper")
 
 MAX_COUNT = 12
-ROUNDS = 3
+ROUNDS = 5                  # most Claude calls for one niche
 PER_NICHE_CANDIDATES = 15
 PATTERN_MAX = 2
 MODE = {"gta_6": "gta", "creators": "creators", "upcoming_tech": "tech"}          # niches with their own theme rules
 DESCRIPTIONS = {"upcoming_games": "an upcoming game's release date, window, delay or launch detail",
                 "trailers": "a new game trailer", "upcoming_tech": "upcoming gaming hardware or technology",
-                "gta_6": "GTA 6", "creators": "a gaming creator or esports moment"}
+                "gta_6": "GTA 6", "creators": "a gaming creator or esports moment",
+                "free_games": "a game that is free to claim or keep (say the store and the end date only if stated)",
+                "secrets_glitches": "an easter egg, hidden secret, glitch or exploit players found",
+                "game_updates": "a patch, update, season or expansion for a game"}
 
 
 def niches() -> list[str]:
@@ -132,6 +135,8 @@ def run_batch(cfg: Config, count: int = MAX_COUNT, hours: float | None = None, d
         queues: dict[str, deque] = {n: deque() for n in names}
         empty: set[str] = set()
 
+        limit = cap                                              # rises when niches run short
+
         def refill(niche: str) -> bool:
             """One more Claude call for this niche into its queue. False when it has nothing left to offer."""
             pool[niche] = [s for s in pool[niche] if s.link not in tried]
@@ -145,7 +150,8 @@ def run_batch(cfg: Config, count: int = MAX_COUNT, hours: float | None = None, d
                 s.id, s.watch = i, None
             try:
                 watchlist.annotate(cfg, candidates, found, niche=niche)
-                picks = _pick(cfg, niche, candidates, cap - taken[niche], state)
+                want = limit - taken[niche]
+                picks = _pick(cfg, niche, candidates, want if limit == cap else max(want, 3), state)
             except Exception as exc:                              # one niche failing never stops the others
                 log.warning("batch: %s gave nothing (%s)", niche, str(exc)[:200])
                 picks = []
@@ -184,12 +190,16 @@ def run_batch(cfg: Config, count: int = MAX_COUNT, hours: float | None = None, d
                 return True
             return False
 
-        progressed = True
-        while progressed and sum(taken.values()) < count:
+        while sum(taken.values()) < count:
             progressed = False
             for niche in names:                                   # one each per turn
-                if sum(taken.values()) < count and taken[niche] < cap and take_one(niche):
+                ceiling = min(limit, cap + 1) if niche == "gta_6" else limit
+                if sum(taken.values()) < count and taken[niche] < ceiling and take_one(niche):
                     progressed = True
+            if not progressed:                                    # nobody can add one under this limit
+                if limit >= count:
+                    break
+                limit += 1
         done = sum(taken.values())
         log.info("batch: made per niche (cap %d): %s", cap, ", ".join(f"{n} {taken[n]}" for n in names))
         if done < count:
