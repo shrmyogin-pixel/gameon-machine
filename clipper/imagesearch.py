@@ -68,6 +68,15 @@ UI_HIT = re.compile(r"(subscription|pricing|price[- ]?list|membership|sign[- ]?u
                     r"comparison chart|plans?|store page|eshop)", re.I)
 
 
+# a website's share card (the picture it shows when linked) is an advert for that site, not game art
+SHARE_CARD = re.compile(r"/og/|[/_-]og[-_](?:image|default|card)|opengraph|social[-_](?:card|share|image|preview)|share[-_]card",
+                        re.I)
+
+
+def is_share_card(url: str) -> bool:
+    return bool(SHARE_CARD.search(urllib.parse.urlsplit(url).path))
+
+
 def looks_like_ui(*blobs: str) -> bool:
     return bool(UI_HIT.search(" ".join(b for b in blobs if b)))
 
@@ -186,7 +195,7 @@ def fetch_topic_images(topic: str, folder: Path, cache_root: Path, need: int, kn
             """Download and keep one search hit; True when it became one of the pictures."""
             nonlocal downloads
             url = newsimage._http(hit["url"])
-            if not url or url in tried or not newsimage._usable_url(url):
+            if not url or url in tried or not newsimage._usable_url(url) or is_share_card(url):
                 return False
             tried.add(url)
             too_small = hit["width"] and hit["height"] and not big_enough(hit["width"], hit["height"])

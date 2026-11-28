@@ -2,7 +2,8 @@
 
 Where they come from, best first: the article page's og:image / twitter:image, the pictures the RSS entry carries
 (media:content / media:thumbnail / enclosure / inline <img>), then the article's own body images: <picture>/<source>,
-srcset, data-src and plain <img> tags (inside <article> / <main> first). Parsed with BeautifulSoup. Icons, logos,
+srcset, data-src and plain <img> tags, only from the block that holds the article's text, never from a link to another
+page (related-story cards, adverts) or a related / popular / sign-up box. Parsed with BeautifulSoup. Icons, logos,
 avatars, ads, tracking pixels, SVG/GIF and anything smaller than MIN_WIDTH x MIN_HEIGHT or banner-shaped are dropped,
 and so are near-duplicates (the same photo at another size, found by a perceptual hash).
 
@@ -48,11 +49,9 @@ IMAGE_NAME = "news_image_{n}.jpg"
 META_KEYS = ("og:image:secure_url", "og:image", "twitter:image", "twitter:image:src")
 JUNK = re.compile(r"(logo|favicon|sprite|avatar|icon|placeholder|blank|pixel|1x1|gravatar|emoji|badge|spacer|"
                   r"(^|[-_/.])(ads?|advert\w*|banner|sponsor\w*|promo|tracking|share|button|author|profile)([-_/.]|$))", re.I)
-# the outlet advertising itself ("SUBSCRIBE ON YOUTUBE"): by file name / alt text, or by where clicking it leads
+# the outlet advertising itself ("SUBSCRIBE ON YOUTUBE"): by file name / alt text
 PROMO = re.compile(r"c2a|(?<![a-z])cta(?![a-z])|newsletter|follow[-_ ]?us|join[-_ ]?us|subscribe[-_ ]?(?:on|to|now|banner|button)|"
                    r"(?:youtube|discord|whatsapp|telegram)[-_ ]?(?:sub|subscribe|banner|promo|join)|patreon|google[-_ ]?news", re.I)
-PROMO_LINK = re.compile(r"youtube\.com/(?:@|c/|channel/|user/)|sub_confirmation|discord\.(?:gg|com/invite)|patreon\.com|"
-                        r"news\.google\.com|whatsapp\.com/channel|//t\.me/", re.I)
 # thumbnails of other people's videos and streams are never used (search results and article pages alike)
 VIDEO_THUMB_HOSTS = ("ytimg.com", "img.youtube.com", "vumbnail.com", "vimeocdn.com", "jtvnw.net", "files.kick.com",
                      "tiktokcdn.com")
@@ -71,6 +70,12 @@ GAMBLING_SOURCE = re.compile(r"casino|sportsbook|gambl|betting|betus|bet365|1xbe
 
 SKIP_PARENTS = {"nav", "header", "footer", "aside", "form", "button", "svg", "script", "style", "noscript"}
 SIZE_SUFFIX = re.compile(r"-\d{2,4}x\d{2,4}(?=\.\w+$)")
+# boxes inside the article's text that are about something else, by class or id
+OTHER_BOX = re.compile(r"related|recommend|popular|trending|read[-_]?(?:next|more)|more[-_](?:on|from|stories|news)|sidebar|"
+                       r"newsletter|membership|author|comment|advert|sponsor|promo|affiliate|(?<![a-z])ad[-_](?:slot|unit|container|wrap)",
+                       re.I)
+IMAGE_FILE = re.compile(r"\.(?:jpe?g|png|webp|avif)$", re.I)
+MIN_BODY_TEXT = 300                       # characters of paragraphs that make a block "the article's text"
 
 
 # ------------------------------------------------------------------ finding candidate URLs
@@ -151,13 +156,48 @@ def _soup(page: str):
         return BeautifulSoup(page, "html.parser")
 
 
+def _article_body(soup):
+    """The block that holds the article's text (the most paragraph text as direct children); for a page with hardly
+    any, its only <article>, else <main>. None when there is no telling which pictures are the article's own."""
+    text: dict[int, int] = {}
+    blocks: dict[int, object] = {}
+    for p in soup.find_all("p"):
+        if any(a.name == "a" or a.name in SKIP_PARENTS for a in p.parents if a.name):
+            continue
+        key = id(p.parent)
+        blocks[key] = p.parent
+        text[key] = text.get(key, 0) + len(p.get_text(" ", strip=True))
+    if text:
+        best = max(text, key=text.get)
+        if text[best] >= MIN_BODY_TEXT:
+            return blocks[best]
+    articles = [a for a in soup.find_all("article") if not a.find_parent(["article", "a"])]
+    return articles[0] if len(articles) == 1 else soup.find("main")
+
+
+def _own_picture(tag, body) -> bool:
+    """Inside the article's text block, and not a card, advert or box that leads somewhere else."""
+    inside = False
+    for p in tag.parents:
+        if p is body:
+            inside = True
+        if p.name == "a":
+            href = (p.get("href") or "").strip()
+            link = urllib.parse.urlsplit(href)
+            if href and not href.startswith(("#", "javascript:")) and not IMAGE_FILE.search(link.path):
+                return False                                # a link to another page, not to the full-size picture
+        if not inside and OTHER_BOX.search(" ".join([*(p.get("class") or []), p.get("id") or ""])):
+            return False
+    return inside
+
+
 class _PageParser:
-    """og/twitter meta tags and every candidate <img> / <picture><source> of a page (BeautifulSoup), each with whether
-    it sits inside <article> / <main>. Pictures inside nav / header / footer / aside / forms are ignored."""
+    """og/twitter meta tags and the article's own <img> / <picture><source> pictures (BeautifulSoup). Pictures outside
+    its text block, in links to other pages, or inside nav / header / footer / aside / forms are ignored."""
 
     def __init__(self):
         self.found: dict[str, str] = {}
-        self.imgs: list[tuple[str, bool, str]] = []
+        self.imgs: list[tuple[str, str]] = []
 
     def feed(self, page: str) -> None:
         soup = _soup(page)
@@ -166,24 +206,24 @@ class _PageParser:
             content = (tag.get("content") or "").strip()
             if key in META_KEYS and content:
                 self.found.setdefault(key, content)
-        for tag in soup.find_all(["img", "source"]):
+        body = _article_body(soup)
+        for tag in soup.find_all(["img", "source"]) if body is not None else []:
             if tag.name == "source" and (tag.parent is None or tag.parent.name != "picture"):
                 continue
             if any(p.name in SKIP_PARENTS for p in tag.parents if p.name):
                 continue
-            if any(p.name == "a" and PROMO_LINK.search(p.get("href") or "") for p in tag.parents):
-                continue                                    # a banner that sends readers to the outlet's own channel
+            if not _own_picture(tag, body):
+                continue
             url = (_best_from_srcset(tag.get("srcset") or tag.get("data-srcset") or "") or tag.get("data-src")
                    or tag.get("data-lazy-src") or tag.get("data-original") or tag.get("src"))
             w, h = _num(tag.get("width")), _num(tag.get("height"))
             if url and not (0 < w < 300) and not (0 < h < 150) and not url.startswith("data:"):
                 blob = " ".join([" ".join(tag.get("class") or []), tag.get("alt") or "", tag.get("id") or ""])
-                in_article = any(p.name in ("article", "main") for p in tag.parents if p.name)
-                self.imgs.append((url, in_article, blob))
+                self.imgs.append((url, blob))
 
 
 def article_images(page: str, base_url: str) -> list[str]:
-    """Picture URLs from an article page, best first: og/twitter image, then body images (article/main first)."""
+    """Picture URLs from an article page, best first: og/twitter image, then the article body's own images."""
     parser = _PageParser()
     try:
         parser.feed(page)
@@ -198,10 +238,8 @@ def article_images(page: str, base_url: str) -> list[str]:
     for key in META_KEYS:
         if key in parser.found:
             add(parser.found[key])
-    for want_article in (True, False):
-        for url, in_article, blob in parser.imgs:
-            if in_article == want_article:
-                add(url, blob)
+    for url, blob in parser.imgs:
+        add(url, blob)
     return out
 
 

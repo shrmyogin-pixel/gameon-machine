@@ -30,6 +30,9 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 ## Pictures and hooks
 - 8-10 real pictures per news Short (at least 5, else skip the story, unless it has 3 or more video clips). No placeholders or generated cards.
 - Reject low-res (under 1000x560 either way up), blurry, odd-shaped and duplicate pictures (`newsimage.save_picture`).
+- Pictures from an article page come only from the block holding the article's text, never from a link to another page
+  or a related / popular / sign-up box (`newsimage._own_picture`). Web search skips websites' share cards
+  (`imagesearch.is_share_card`).
 - Never a picture from, or naming, a betting or casino business (`newsimage.GAMBLING_SOURCE`). A sponsor logo inside
   an ordinary photo is not detected: check pictures in review.
 - Never a thumbnail of someone else's video or stream (`newsimage.is_video_thumbnail`).
