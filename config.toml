@@ -104,7 +104,7 @@ official_channels = [
     "Focus Entertainment", "Devolver Digital", "Annapurna Interactive", "Paradox Interactive", "Riot Games", "VALORANT",
     "League of Legends", "Fortnite", "Minecraft", "Team Cherry", "Digital Extremes", "Warframe",
     "NVIDIA", "NVIDIA GeForce", "AMD", "Intel", "Intel Gaming", "ASUS ROG",
-    "Lenovo Legion",
+    "Lenovo Legion", "Lenovo", "Hearthstone", "The Official Pokémon YouTube channel",
 ]
 videos_max = 15                    # most clips per Short (3-4 s each); only what the length needs, pictures (2-2.5 s) fill gaps
 picture_repeat_hours = 48          # avoid pictures that Shorts made this recently already showed (0 = off)
