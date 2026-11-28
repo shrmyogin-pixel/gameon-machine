@@ -2,9 +2,10 @@
 
 Sources, in this order, until there are enough clips:
   1. assets/gameplay/<game-slug>/   your own recordings
-  2. YouTube via yt-dlp             official trailers, gameplay, creator clips and reveals from VERIFIED channels only
+  2. YouTube via yt-dlp             VERIFIED channels only; with [news] official_only, only publisher / platform channels
+                                    ([news] official_channels, the game's own channel, or its Steam developer / publisher)
   3. Steam store trailers           the publisher's official promotional videos (public store API, no key)
-  4. Wikimedia Commons              freely licensed videos, credited with author and license
+  4. Wikimedia Commons              freely licensed videos, credited with author and license (not with official_only)
 
 Nothing is signed in to or unlocked: age-restricted, private and live videos are left alone. Source audio is dropped,
 every source is credited, and a downloaded video is deleted as soon as its clips are cut. Everything is best-effort:
@@ -104,6 +105,38 @@ def queries(topic: str, kind: str) -> list[str]:
     return [f"{topic} official trailer", f"{topic} gameplay"]
 
 
+# words a publisher adds to its channel name ("Bethesda Softworks", "Nintendo of America")
+CHANNEL_TAIL = re.compile(r"(?: (?:official|entertainment|studios?|interactive|inc|llc|ltd|co|corporation|softworks|"
+                          r"of america|north america|america|europe|uk|usa|us))+$")
+
+
+def channel_key(name: str) -> str:
+    return CHANNEL_TAIL.sub("", _name(name))
+
+
+def is_official(entry: dict, topic: str, official: set, kind: str = "") -> bool:
+    """The channel belongs to a publisher or platform holder: it is listed (`official`, as channel_key values), or its
+    name is exactly the game's (never assumed for a creator story, where that would be the creator's own channel)."""
+    channel = str(entry.get("channel") or "")
+    if channel_key(channel) in official:
+        return True
+    game = _name(topic)
+    return kind != "creator" and _name(channel) in (game, f"{game} official")
+
+
+def official_names(cfg, topic: str, timeout: float) -> set:
+    """channel_key values that count as official for this topic: the configured list plus the game's Steam developers
+    and publishers."""
+    names = list(cfg.news.get("official_channels", []))
+    try:
+        app = steam_app(topic, timeout)
+        if app:
+            names += [*(app[2].get("developers") or []), *(app[2].get("publishers") or [])]
+    except Exception as exc:
+        log.info("video search: no Steam publisher for %r (%s)", topic, type(exc).__name__)
+    return {k for k in (channel_key(str(n)) for n in names) if k}
+
+
 def usable_hit(topic: str, entry: dict, exclude: str = "") -> bool:
     title, channel = str(entry.get("title") or ""), str(entry.get("channel") or "")
     duration = entry.get("duration") or 0
@@ -131,18 +164,19 @@ def _ydl(options: dict):
                              "socket_timeout": 20, **options})
 
 
-def youtube_sources(topic: str, kind: str, exclude: str = "") -> list[dict]:
-    """Verified-channel search hits, official ones first. [] on any failure."""
+def youtube_sources(topic: str, kind: str, exclude: str = "", official: set | None = None) -> list[dict]:
+    """Verified-channel search hits, official ones first; with `official`, publisher channels only. [] on any failure."""
+    results = YT_RESULTS if official is None else YT_RESULTS * 2      # most hits are not publishers: look further
     hits: dict[str, dict] = {}
     for query in queries(topic, kind):
         try:
             with _ydl({"extract_flat": True}) as ydl:
-                found = ydl.extract_info(f"ytsearch{YT_RESULTS}:{query}", download=False)
+                found = ydl.extract_info(f"ytsearch{results}:{query}", download=False)
         except Exception as exc:
             log.info("video search: youtube failed for %r (%s: %s)", query, type(exc).__name__, str(exc)[:100])
             continue
         for entry in (found or {}).get("entries") or []:
-            if entry and usable_hit(topic, entry, exclude):
+            if entry and usable_hit(topic, entry, exclude) and (official is None or is_official(entry, topic, official, kind)):
                 hits.setdefault(entry["id"], entry)
         if len(hits) >= YT_DOWNLOADS * 2:
             break
@@ -380,12 +414,14 @@ def fetch_clips(cfg, subjects: list[str], folder: Path, own_root: Path, need: in
 
     -> [{'file', 'url', 'source', 'credit'}]. Never raises."""
     downloads = YT_DOWNLOADS + (3 if seen else 0)          # some sources may have nothing new left
+    official_only = bool(cfg is not None and cfg.news.get("official_only", True))
     for topic in [t.strip() for t in subjects if t and topic_words(t)]:
         kept: list[dict] = []
         sources = [lambda: own_sources(topic, own_root),
-                   lambda: youtube_sources(topic, kind, exclude)[:downloads] if youtube else [],
+                   lambda: youtube_sources(topic, kind, exclude, **({"official": official_names(cfg, topic, timeout)}
+                                                           if official_only else {}))[:downloads] if youtube else [],
                    lambda: steam_sources(topic, timeout),
-                   lambda: commons_sources(topic, timeout)]
+                   lambda: [] if official_only else commons_sources(topic, timeout)]
         for find in sources:
             for video in find():
                 if len(kept) >= need:

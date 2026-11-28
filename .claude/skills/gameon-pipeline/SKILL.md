@@ -62,6 +62,10 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 ## Video clips (every command)
 - `videosearch.py` gives each news Short as many clips as its length needs (at most 15): own recordings in `assets/gameplay/<game-slug>/`, then VERIFIED
   YouTube channels through `yt-dlp` (`[news] youtube`), Steam store trailers, Wikimedia Commons.
+- **Official publisher footage only** (`[news] official_only = true`, the user's choice): YouTube video must come from a
+  verified publisher or platform channel (`official_channels`, the game's own channel, or its Steam developer /
+  publisher). Never outlets, creators or compilation channels, and no Wikimedia Commons video. Own recordings and Steam
+  trailers stay. Pictures are not covered by this rule.
 - Clips are 3-4 s of the liveliest moments (never the first 5 s or last 10 s), muted, reframed to 1080x1920 over a
   blurred fill. Stills stay 2-2.5 s with a Ken Burns move. No signing in, no age-restricted or live videos.
 - Every video source is named on the `Sources & Credits:` line itself.

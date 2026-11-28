@@ -93,6 +93,19 @@ promo_hours = 48                   # promo.bat / news --topic promo
 banger_hours = 72                  # banger12.bat / news --all-niches
 video = true                       # video clips in every news Short (assets/gameplay, YouTube, Steam trailers, Commons)
 youtube = true                     # verified YouTube channels through yt-dlp; false = leave YouTube alone
+official_only = true               # video only from publisher / platform channels, Steam trailers and your own recordings
+# publisher / platform YouTube channels; the game's own channel and its Steam developer / publisher count too
+official_channels = [
+    "Rockstar Games", "PlayStation", "Xbox", "Xbox Game Studios", "Nintendo", "Steam",
+    "Valve", "Epic Games", "Epic Games Store", "Ubisoft", "Electronic Arts", "EA",
+    "EA SPORTS", "Bethesda Softworks", "Activision", "Call of Duty", "Blizzard Entertainment", "SEGA",
+    "Capcom", "CapcomUSA", "Monster Hunter", "Resident Evil", "Square Enix", "Bandai Namco Entertainment",
+    "2K", "Warner Bros. Games", "CD PROJEKT RED", "FromSoftware", "KONAMI", "THQ Nordic",
+    "Focus Entertainment", "Devolver Digital", "Annapurna Interactive", "Paradox Interactive", "Riot Games", "VALORANT",
+    "League of Legends", "Fortnite", "Minecraft", "Team Cherry", "Digital Extremes", "Warframe",
+    "NVIDIA", "NVIDIA GeForce", "AMD", "Intel", "Intel Gaming", "ASUS ROG",
+    "Lenovo Legion",
+]
 videos_max = 15                    # most clips per Short (3-4 s each); only what the length needs, pictures (2-2.5 s) fill gaps
 picture_repeat_hours = 48          # avoid pictures that Shorts made this recently already showed (0 = off)
 video_repeat_hours = 48            # never show footage that Shorts made this recently already showed (0 = off)

@@ -15,6 +15,36 @@ class LockedPipelineRules(unittest.TestCase):
         self.assertEqual(cfg.render["max_renders"], 1)
         self.assertFalse(cfg.raw["general"]["autopost"])
 
+    def test_video_comes_from_official_publishers_only(self):
+        from clipper import videosearch as v
+        cfg = load_config()
+        self.assertTrue(cfg.news["official_only"])
+        official = {v.channel_key(n) for n in cfg.news["official_channels"]}
+        for channel in ("Rockstar Games", "PlayStation", "Nintendo of America", "Bethesda Softworks", "NVIDIA GeForce"):
+            self.assertTrue(v.is_official({"channel": channel}, "Some Game", official), channel)
+        for channel in ("IGN", "GameSpot", "GameTrailers", "Kai Cenat Live", "Indie Games Hub", "PlayStation Fan",
+                        "GTA Games"):
+            self.assertFalse(v.is_official({"channel": channel}, "GTA 6", official), channel)
+        self.assertTrue(v.is_official({"channel": "Tin Coffins"}, "Tin Coffins", official))
+        self.assertFalse(v.is_official({"channel": "Kai Cenat"}, "Kai Cenat", official, "creator"))
+
+    def test_the_video_search_applies_it(self):
+        from pathlib import Path
+        from unittest import mock
+        from clipper import videosearch as v
+        cfg = load_config()
+        asked = {}
+
+        def hits(topic, kind, exclude="", official=None):
+            asked["official"] = official
+            return []
+        with mock.patch.object(v, "youtube_sources", hits), mock.patch.object(v, "steam_sources", return_value=[]), \
+                mock.patch.object(v, "steam_app", return_value=(1, "Hades 3", {"publishers": ["Tiny Publisher LLC"]})), \
+                mock.patch.object(v, "commons_sources") as commons:
+            v.fetch_clips(cfg, ["Hades 3"], Path("."), Path("no-recordings"), 5)
+        self.assertIn("tiny publisher", asked["official"])
+        commons.assert_not_called()
+
     def test_each_bucket_has_its_pill(self):
         self.assertEqual([badge_label(b, subject="GTA 6") for b in BUCKETS],
                          ["GTA 6", "FREE GAME", "PATCH UPDATE", "WILD BUG", "CREATOR NEWS", "GAMING TECH"])
