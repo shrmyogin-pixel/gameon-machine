@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import db
+from . import db, hookbank
 from .config import Config
 from .lifecycle import discard
 from .routing import assign_routes
@@ -265,6 +265,11 @@ class Handler(BaseHTTPRequestHandler):
                 if m.group(2) == "status":
                     clip = db.review_action(self.cfg.database, clip_id, str(body.get("action", "")))
                     log.info("[%s] review: %s -> %s", clip["folder"], body.get("action"), clip["status"])
+                    try:
+                        hookbank.feedback(self.cfg, clip, str(body.get("action", "")))
+                        clip = db.get_clip(self.cfg.database, clip_id)
+                    except Exception:                    # the decision stands even if the count could not be saved
+                        log.exception("[%s] could not update the hook bank (ignored)", clip["folder"])
                     if clip["status"] in ("rejected", "posted"):          # reject / mark uploaded: files go now
                         outcome = discard(self.cfg, clip, "rejected" if clip["status"] == "rejected" else "uploaded")
                         clip = db.get_clip(self.cfg.database, clip_id)

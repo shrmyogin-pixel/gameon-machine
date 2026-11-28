@@ -18,6 +18,7 @@ import re
 BUCKETS = ("flagship", "freebie", "update", "glitch", "creator", "tech")
 LABELS = {"flagship": "GTA 6", "freebie": "FREE GAME", "update": "PATCH UPDATE", "glitch": "WILD BUG",
           "creator": "CREATOR NEWS", "tech": "GAMING TECH"}
+PROMO_LABELS = {"deal": "GAME DEAL", "pick": "TECH PICK"}      # promo.bat only: not part of the six-bucket mix
 OTHER_FLAGSHIP_LABEL = "BIG GAME"          # a flagship story that is not about GTA must not wear a "GTA 6" badge
 GTA = re.compile(r"\b(gta|grand theft auto)\b", re.I)
 OLDER_GTA = re.compile(r"\b(?:gta|grand theft auto)[ :-]*(?:online|5|v|iv|4|iii|3|san andreas|vice city|trilogy)\b", re.I)
@@ -56,8 +57,8 @@ def badge_label(bucket: str, kind: str = "news", subject: str = "") -> str:
             return OTHER_FLAGSHIP_LABEL
         if OLDER_GTA.search(subject):
             return "GTA"
-    if bucket in LABELS:
-        return LABELS[bucket]
+    if bucket in LABELS or bucket in PROMO_LABELS:
+        return {**LABELS, **PROMO_LABELS}[bucket]
     return LABELS["freebie"] if kind == "free_offer" else "BREAKING NEWS"
 
 

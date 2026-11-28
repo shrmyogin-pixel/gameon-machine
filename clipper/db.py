@@ -87,6 +87,10 @@ EXTRA_COLUMNS = {
     "assign_slot": "TEXT",        # HUMAN choice: posting slot name from config [[slots]] (beats the automatic routing)
     "files_deleted_at": "TEXT",   # reject / mark-uploaded delete the clip folder; set when that happened
     "assign_target": "TEXT",      # HUMAN choice: 'youtube' (top 2-3) or 'other' platforms (beats the automatic routing)
+    "qa_warnings": "TEXT",        # JSON list from the post-render QA (qa.py); NULL = not checked, [] = passed
+    "hook_id": "TEXT",            # hook_bank.json pattern the Short's hook follows
+    "hook_feedback": "TEXT",      # what the dashboard has counted for it: approved | rejected | NULL
+    "mature_flag": "TEXT",        # games Steam flags for gore / sexual content; '' none, 'unchecked', NULL never looked up
 }
 ASSIGN_TARGETS = ("youtube", "other")
 
@@ -200,7 +204,25 @@ def row_to_dict(row: sqlite3.Row) -> dict:
     d["meme_caption"] = _loads(d.get("meme_caption"))
     d["banger"] = bool(d.get("banger"))
     d["sensitive"] = bool(d.get("sensitive"))
+    d["qa_warnings"] = None if d.get("qa_warnings") is None else _loads(d["qa_warnings"])
     return d
+
+
+def set_qa(db_path: Path, folder: str, warnings: list[str]) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET qa_warnings = ?, updated_at = datetime('now') WHERE folder = ?",
+                     (json.dumps(warnings, ensure_ascii=False), folder))
+
+
+def set_mature_flag(db_path: Path, folder: str, flag: str) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET mature_flag = ?, updated_at = datetime('now') WHERE folder = ?", (flag, folder))
+
+
+def set_hook(db_path: Path, folder: str, hook_id: str, feedback: str | None = None) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET hook_id = ?, hook_feedback = ?, updated_at = datetime('now') WHERE folder = ?",
+                     (hook_id, feedback, folder))
 
 
 def list_clips(db_path: Path, status: str | None = None, handle: str | None = None, banger: bool | None = None,
@@ -369,7 +391,7 @@ def count_accepted_since(db_path: Path, since_utc: str, news: bool | None = None
     sql = ("SELECT COUNT(*) AS n FROM clips WHERE created_at >= ? AND status IN "
            "('edited', 'rendered', 'approved', 'rejected', 'posted')")
     if news is True:
-        sql += " AND platform = 'news'"
+        sql += " AND platform = 'news' AND COALESCE(moment_kind, '') != 'promo'"
     elif news is False:
         sql += " AND platform != 'news'"
     with connect(db_path) as conn:
@@ -412,11 +434,12 @@ def clip_by_folder(db_path: Path, folder: str) -> dict | None:
     return row_to_dict(row) if row else None
 
 
-def recent_news_titles(db_path: Path, since_utc: str) -> list[str]:
+def recent_news_titles(db_path: Path, since_utc: str, promo: bool = False) -> list[str]:
     """Titles of news Shorts made since `since_utc` (failed ones excluded): what the channel just covered."""
     with connect(db_path) as conn:
+        extra = "" if promo else " AND COALESCE(moment_kind, '') != 'promo'"
         return [r["title"] for r in conn.execute(
-            "SELECT title FROM clips WHERE platform = 'news' AND title IS NOT NULL AND status != 'failed'"
+            "SELECT title FROM clips WHERE platform = 'news' AND title IS NOT NULL AND status != 'failed'" + extra +
             " AND created_at >= ? ORDER BY id DESC", (since_utc,))]
 
 
@@ -458,12 +481,13 @@ def recent_used_pictures(db_path: Path, since_utc: str) -> list[tuple[int, int]]
             "SELECT ahash, dhash FROM used_pictures WHERE created_at >= ?", (since_utc,))]
 
 
-def news_urls_seen(db_path: Path) -> set[str]:
+def news_urls_seen(db_path: Path, promo: bool = False) -> set[str]:
     """Article URLs that already became a news Short (so the same story is never made twice).
     A story whose Short failed is not counted, so the next run can try it again."""
     with connect(db_path) as conn:
+        extra = "" if promo else " AND COALESCE(moment_kind, '') != 'promo'"
         return {r["source_url"] for r in conn.execute(
-            "SELECT source_url FROM clips WHERE platform = 'news' AND source_url IS NOT NULL AND status != 'failed'")}
+            "SELECT source_url FROM clips WHERE platform = 'news' AND source_url IS NOT NULL AND status != 'failed'" + extra)}
 
 
 # ------------------------------------------------------------------ clean

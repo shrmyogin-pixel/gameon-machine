@@ -53,6 +53,22 @@ PROMO = re.compile(r"c2a|(?<![a-z])cta(?![a-z])|newsletter|follow[-_ ]?us|join[-
                    r"(?:youtube|discord|whatsapp|telegram)[-_ ]?(?:sub|subscribe|banner|promo|join)|patreon|google[-_ ]?news", re.I)
 PROMO_LINK = re.compile(r"youtube\.com/(?:@|c/|channel/|user/)|sub_confirmation|discord\.(?:gg|com/invite)|patreon\.com|"
                         r"news\.google\.com|whatsapp\.com/channel|//t\.me/", re.I)
+# thumbnails of other people's videos and streams are never used (search results and article pages alike)
+VIDEO_THUMB_HOSTS = ("ytimg.com", "img.youtube.com", "vumbnail.com", "vimeocdn.com", "jtvnw.net", "files.kick.com",
+                     "tiktokcdn.com")
+
+
+def is_video_thumbnail(url: str) -> bool:
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return any(host == d or host.endswith("." + d) for d in VIDEO_THUMB_HOSTS)
+
+
+# pictures from, or naming, a betting / casino business are never used (Zero-Ban Policy: no gambling promotion). A logo
+# inside an ordinary photo cannot be seen from its address, so a human still checks the pictures in review.
+GAMBLING_SOURCE = re.compile(r"casino|sportsbook|gambl|betting|betus|bet365|1xbet|betway|betboom|ggbet|thunderpick|draftkings|"
+                             r"fanduel|rollbit|csgoroll|parimatch|bovada|(?<![a-z])stake\.(?:com|us)", re.I)
+
+
 SKIP_PARENTS = {"nav", "header", "footer", "aside", "form", "button", "svg", "script", "style", "noscript"}
 SIZE_SUFFIX = re.compile(r"-\d{2,4}x\d{2,4}(?=\.\w+$)")
 
@@ -71,7 +87,7 @@ def _num(v) -> int:
 
 
 def _usable_url(url: str | None, name_blob: str = "") -> bool:
-    if not url or not _http(url):
+    if not url or not _http(url) or is_video_thumbnail(url) or GAMBLING_SOURCE.search(f"{url} {name_blob}"):
         return False
     path = urllib.parse.urlsplit(url).path.lower()
     if path.endswith((".svg", ".gif", ".ico")):
@@ -471,6 +487,8 @@ def fetch_news_images(story, folder: Path, timeout: float = 15.0, want: int = 5)
             if u in tried or (ident in tried and u == url):
                 continue
             tried.add(u)
+            if is_video_thumbnail(u) or GAMBLING_SOURCE.search(u):   # og:image / feed pictures bypass _usable_url
+                continue
             attempts += 1
             try:
                 data, ctype = download_retry(u, MAX_IMAGE_BYTES, timeout, referer=story.link, tries=2)

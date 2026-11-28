@@ -16,9 +16,9 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - `[general] autopost = false`. Never add code that uploads or publishes.
 
 ## Look
-- **Captions: `refs/no change.JPG` is the reference. Do not restyle or move them.**
-  Word-by-word, 2-3 words, Impact 100, white with the spoken word in cyan (yellow for numbers and trigger words),
-  dark navy outline with magenta shadow, centred at y=1180; small `Source: <outlet>` line at y=1330.
+- **Captions: layout as in `refs/no change.JPG` (colours changed on request). Do not restyle or move them.**
+  Word-by-word, 2-3 words, Impact 100, white with the spoken word in golden yellow #FFD400 (green #3DFF6E for numbers and trigger words),
+  black outline and shadow, no glow (hook: same white, gold, black), centred at y=1180; small `Source: <outlet>` line at y=1330.
   Code: `render.pop_caption_events`, style `Cap` in `news_render.build_news_ass`.
 - **Category pill: normal solid yellow fill, dark text.** Opaque box (ASS `BorderStyle 3`), fill `&H0000D4FF&`,
   text `&H00141414&`, no glow, no neon, no shadow. `refs/change 1.JPG` shows the old glowing pill: do not go back to it.
@@ -27,8 +27,11 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - Game On watermark bottom-left, above the y=1450 safe zone.
 
 ## Pictures and hooks
-- 8-10 real pictures per news Short (at least 5, else skip the story). No placeholders or generated cards.
+- 8-10 real pictures per news Short (at least 5, else skip the story, unless it has 3 or more video clips). No placeholders or generated cards.
 - Reject low-res (under 1000x560 either way up), blurry, odd-shaped and duplicate pictures (`newsimage.save_picture`).
+- Never a picture from, or naming, a betting or casino business (`newsimage.GAMBLING_SOURCE`). A sponsor logo inside
+  an ordinary photo is not detected: check pictures in review.
+- Never a thumbnail of someone else's video or stream (`newsimage.is_video_thumbnail`).
 - Never an outlet's own promo graphic (subscribe / follow / newsletter banners).
 - A Short avoids pictures that Shorts of the last 48 hours showed, reusing one only to avoid having too few.
 - Hooks: curiosity gap or concrete stake, never the headline read back, no vague "Nobody expected this" teaser,
@@ -53,6 +56,47 @@ These are fixed. Change one only when the user explicitly asks for that change; 
   (`creators.py`), looking back `[news] creators_hours`, no trend Shorts, every pill `CREATOR NEWS`.
 - Never real people's arrests, allegations, abuse, deaths or private life. One Short per creator or event.
 - `news.bat`, `export.bat` and the GTA-only filter are unaffected.
+
+## Video clips (every command)
+- `videosearch.py` gives each news Short as many clips as its length needs (at most 15): own recordings in `assets/gameplay/<game-slug>/`, then VERIFIED
+  YouTube channels through `yt-dlp` (`[news] youtube`), Steam store trailers, Wikimedia Commons.
+- Clips are 3-4 s of the liveliest moments (never the first 5 s or last 10 s), muted, reframed to 1080x1920 over a
+  blurred fill. Stills stay 2-2.5 s with a Ken Burns move. No signing in, no age-restricted or live videos.
+- Every video source is named on the `Sources & Credits:` line itself.
+- Games the Steam store marks for gore or sexual content get no Steam trailers. Check all footage in review.
+- `tech.bat` or `python -m clipper news --topic tech`: gaming tech headlines only, pill `GAMING TECH`.
+
+## Watchlist, source check, QA and hook bank
+- `config/watchlist.json` is read by news, GTA, creators and tech runs, never promo: yt-dlp metadata only, cached
+  (`watchlist.py`). An outlier title is a signal, never a source: it only ranks and pairs stories the feeds report, and it
+  is not shown to the writer. No sponsored, deal or affiliate items; credit links lose affiliate parameters.
+- Its `badge_hint` values are not used: pill words stay the ones above.
+- Source check before any voiceover, B-roll or render (`factcheck.py`): link and outlet, numbers and months found in the
+  source, leaks and rumours labelled.
+- Post-render QA (`qa.py`): 1080x1920, video decodes, `Sources & Credits:` present. Warnings show on the dashboard only.
+- `data/hook_bank.json` (`hookbank.py`): use count at render; approval / rejection counts and a note from dashboard
+  actions, once per clip. Reject / Mark Uploaded still delete the folder at once.
+
+## Steam mature flag
+- A news Short about a game Steam flags for gore or sexual content (descriptors 1-4) is NOT skipped (the user's choice):
+  it renders as normal and the dashboard shows `MATURE / STEAM FLAG: GORE OR SEXUAL CONTENT` and asks again on Approve.
+  Steam trailers stay excluded for descriptors 2-4. Games not on Steam are never tagged.
+
+## Batch mode and dense Shorts
+- `banger12.bat` (`news --all-niches --count 12 --min-videos 12 --min-photos 22 --no-promo`, `batch.py`): up to 12
+  Shorts over every watchlist niche, strict round-robin, at most ceil(count / niches) per niche (3 of 12), even if that
+  leaves the batch short. No repeated story or game (GTA 6: angle), no repeated hook opening, one pattern at
+  most twice. Never promo, deal or sponsored items; no trend Shorts.
+- Dense Shorts (this mode, or `--min-videos` / `--min-photos`) need 10+ video cuts, or 20+ distinct pictures / clip
+  frames; otherwise the story is skipped. The flags say how many to try for. Only here, cuts are shorter than the usual
+  3-4 s / 2-2.5 s: video from 2.5 s, pictures from 1.2 s (the user asked for this density). Everything else is unchanged.
+
+## Promo mode
+- `promo.bat` or `python -m clipper news --topic promo`: deals, discounts, bundles and gear spotlights, pill
+  `GAME DEAL` or `TECH PICK` (same solid yellow).
+- Isolated: promo Shorts are invisible to the other commands' repeat checks and daily quota, and never take a YouTube
+  slot automatically. A promo run does avoid stories the other commands already made.
+- No monetised links, codes or disclosures anywhere in the code or upload sheets.
 
 ## Credit and attribution
 - Every export's description ends with a `Sources & Credits:` line naming the source and its link. No line, no export.

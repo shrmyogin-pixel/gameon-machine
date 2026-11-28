@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "scan_settings": {
+    "mode": "metadata_only",
+    "max_items_per_source": 12,
+    "cache_ttl_minutes": 360,
+    "request_delay_seconds": 1.5,
+    "outlier_view_multiplier": 2.5,
+    "min_views_for_outlier": 25000,
+    "allow_promo_items": false,
+    "strip_affiliate_links": true
+  },
+  "buckets": {
+    "upcoming_games": [
+      {
+        "id": "ug_ign",
+        "name": "IGN",
+        "type": "channel_url",
+        "url": "https://www.youtube.com/@IGN/videos",
+        "badge_hint": "RELEASE NEWS"
+      },
+      {
+        "id": "ug_release_window_search",
+        "name": "Upcoming Game Releases Search",
+        "type": "search_query",
+        "query": "upcoming games release date announcement gameplay",
+        "badge_hint": "RELEASE DATE"
+      }
+    ],
+    "trailers": [
+      {
+        "id": "tr_playstation",
+        "name": "PlayStation",
+        "type": "channel_url",
+        "url": "https://www.youtube.com/@PlayStation/videos",
+        "badge_hint": "NEW TRAILER"
+      },
+      {
+        "id": "tr_official_trailers_search",
+        "name": "Official Game Trailers Search",
+        "type": "search_query",
+        "query": "official gameplay trailer reveal",
+        "badge_hint": "NEW TRAILER"
+      }
+    ],
+    "upcoming_tech": [
+      {
+        "id": "tech_digital_foundry",
+        "name": "Digital Foundry",
+        "type": "channel_url",
+        "url": "https://www.youtube.com/@DigitalFoundry/videos",
+        "badge_hint": "GAMING TECH"
+      },
+      {
+        "id": "tech_gamers_nexus",
+        "name": "Gamers Nexus",
+        "type": "channel_url",
+        "url": "https://www.youtube.com/@GamersNexus/videos",
+        "badge_hint": "GAMING TECH"
+      },
+      {
+        "id": "tech_upcoming_hardware_search",
+        "name": "Upcoming Gaming Tech Search",
+        "type": "search_query",
+        "query": "upcoming GPU handheld monitor gaming tech announcement",
+        "badge_hint": "GAMING TECH"
+      }
+    ],
+    "gta_6": [
+      {
+        "id": "gta6_search",
+        "name": "GTA 6 News & Breakdowns",
+        "type": "search_query",
+        "query": "GTA 6 trailer details gameplay news",
+        "badge_hint": "GTA 6"
+      }
+    ],
+    "creators": [
+      {
+        "id": "cr_milestones_search",
+        "name": "Gaming Creator Milestones",
+        "type": "search_query",
+        "query": "gaming creator marathon world record milestone",
+        "badge_hint": "CREATOR NEWS"
+      }
+    ]
+  }
+}

@@ -8,7 +8,7 @@ Finds what gamers are watching and grabbing right now WITHOUT touching anybody's
 
 Each item becomes a Story marked with `trend`; headless Claude then finds the core gaming fact, VERIFIES it (unverified
 items are dropped), and rewrites an original 35-second script in Game On's voice (see news.TREND_PROMPT). The Short is
-rendered like any news Short (Tokyo Neon look, real article / topic pictures, neutral voice, CC-BY music, watermark) and its
+rendered like any news Short (house look, real article / topic pictures, neutral voice, CC-BY music, watermark) and its
 `Sources & Credits:` line carries the original video / offer URL. No third-party video, audio or thumbnail is ever used
 for video trends (autopost = false: a human still reviews and uploads).
 """

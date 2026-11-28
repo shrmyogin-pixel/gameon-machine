@@ -49,10 +49,18 @@ def main(argv: list[str] | None = None) -> int:
     nw.add_argument("--hours", type=float, help="only stories newer than this (default [news] hours = 12)")
     nw.add_argument("--count", type=int, help="how many stories to make (default [news] stories = 2)")
     nw.add_argument("--dry-run", action="store_true", help="pick stories and write scripts only: no voice, video or database rows")
-    nw.add_argument("--topic", choices=["gta", "creators"], help="only this theme's stories (looks back [news] <theme>_hours)")
+    nw.add_argument("--topic", choices=["gta", "creators", "tech", "promo"], help="only this theme's stories (looks back [news] <theme>_hours)")
     nw.add_argument("--only-gta", dest="topic", action="store_const", const="gta", help="same as --topic gta")
     nw.add_argument("--creators", dest="topic", action="store_const", const="creators", help="same as --topic creators")
     nw.add_argument("--no-trends", action="store_true", help="skip the trend-discovery Short(s) at the end of the run")
+    nw.add_argument("--no-watchlist", action="store_true", help="do not read config/watchlist.json for this run")
+    nw.add_argument("--all-niches", action="store_true", help="up to --count (max 12) Shorts across every config/watchlist.json niche")
+    nw.add_argument("--min-videos", type=int, help="dense Shorts: video cuts to try for (10-15; a Short needs 10 cuts or 20 pictures)")
+    nw.add_argument("--min-photos", type=int, help="dense Shorts: distinct pictures / frames to try for (20-24)")
+    nw.add_argument("--no-promo", action="store_true", help="leave out sponsored, deal and giveaway stories (no trend Shorts)")
+    wl = sub.add_parser("watchlist", help="show outlier topics from config/watchlist.json and the hook pattern for each (metadata only)")
+    wl.add_argument("--topic", choices=["gta", "creators", "tech"], help="only this theme's sources")
+    wl.add_argument("--refresh", action="store_true", help="ignore the cached listings")
     tr = sub.add_parser("trends", help="Trend discovery: original Shorts from trending gaming topics (YouTube metadata, giveaways)")
     tr.add_argument("--count", type=int, help="how many trend Shorts to make (default [trends] per_run)")
     tr.add_argument("--dry-run", action="store_true", help="pick topics and write scripts only: no voice, video or database rows")
@@ -64,6 +72,11 @@ def main(argv: list[str] | None = None) -> int:
     rv.add_argument("--port", type=int, default=8765, help="port to listen on (default 8765)")
     rv.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
     args = parser.parse_args(argv)
+    if args.command == "news":
+        if args.all_niches and args.topic:
+            parser.error("--all-niches covers every niche: do not combine it with a topic")
+        if args.no_promo and args.topic == "promo":
+            parser.error("--no-promo cannot be combined with --topic promo")
 
     try:
         cfg = load_config()
@@ -196,7 +209,16 @@ def main(argv: list[str] | None = None) -> int:
                 from .trends import run_trends
                 res = run_trends(cfg, args.count, args.dry_run)
             else:
-                res = run_news(cfg, args.hours, args.count, args.dry_run, trends=not args.no_trends, only=args.topic)
+                dense = ({"videos": args.min_videos or 12, "photos": args.min_photos or 22}
+                         if args.all_niches or args.min_videos or args.min_photos else None)
+                if args.all_niches:
+                    from .batch import MAX_COUNT, run_batch
+                    res = run_batch(cfg, args.count or MAX_COUNT, args.hours, args.dry_run,
+                                    research=not args.no_watchlist, dense=dense)
+                else:
+                    extra = {**({"no_promo": True} if args.no_promo else {}), **({"dense": dense} if dense else {})}
+                    res = run_news(cfg, args.hours, args.count, args.dry_run, trends=not args.no_trends,
+                                   only=args.topic, research=not args.no_watchlist, **extra)
             if res.note:
                 print(res.note)
             for p in res.picked:
@@ -205,6 +227,15 @@ def main(argv: list[str] | None = None) -> int:
                 for h in p.hooks:
                     print(f"     {h.total:4.1f}  {h.hook}" + ("" if h.valid else f"   [INVALID: {'; '.join(h.reasons)}]"))
                 print(f"  script ({len(p.script.split())} words): {p.script}")
+                if p.story.watch:
+                    w = p.story.watch
+                    print(f"  watchlist: {w['bucket']}" + (f", outlier {w['ratio']}x" if w["ratio"] else "")
+                          + (f", hook follows {p.hook_pattern}" if p.hook_pattern else ""))
+                if args.dry_run:
+                    from . import factcheck
+                    problems, notes = factcheck.check(cfg, p)
+                    print("  source check: " + ("FAILED: " + "; ".join(problems) if problems else "passed")
+                          + (f"  ({'; '.join(notes)})" if notes else ""))
             for p, folder in res.made:
                 print(f"  MADE: {folder}")
             for p, why in res.failed:
@@ -215,6 +246,26 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"\n{len(res.made)} news Short(s) ready. Review them with: python -m clipper review")
             print("Nothing was uploaded.")
             return 0 if (res.made or (args.dry_run and res.picked) or (not res.failed and not res.note.startswith("run failed"))) else 1
+        if args.command == "watchlist":
+            from collections import Counter
+
+            from . import hookbank, watchlist
+
+            try:
+                sys.stdout.reconfigure(errors="replace")
+            except Exception:
+                pass
+            found = watchlist.scan(cfg, args.topic, args.refresh)
+            bank, taken = hookbank.load(hookbank.bank_path(cfg)), Counter()
+            for o in found:
+                pattern = hookbank.choose(bank, o["bucket"], taken)
+                if pattern:
+                    taken[pattern["id"]] += 1
+                print(f"[{o['bucket']}] {o['ratio']}x  {o['views']:,} views  {o['source']}: {o['title']}\n    {o['url']}")
+                if pattern:
+                    print(f"    hook pattern {pattern['id']}: {pattern['pattern']}")
+            print(f"{len(found)} outlier topic(s). Metadata only: nothing was downloaded or uploaded.")
+            return 0
         if args.command == "clean":
             from .clean import run_clean, settings as clean_settings
 
