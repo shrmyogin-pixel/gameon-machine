@@ -90,6 +90,7 @@ gta_hours = 48                     # gta.bat / news --only-gta look back further
 creators_hours = 36                # creators.bat / news --creators
 tech_hours = 36                    # tech.bat / news --topic tech
 promo_hours = 48                   # promo.bat / news --topic promo
+banger_hours = 72                  # banger12.bat / news --all-niches
 video = true                       # video clips in every news Short (assets/gameplay, YouTube, Steam trailers, Commons)
 youtube = true                     # verified YouTube channels through yt-dlp; false = leave YouTube alone
 videos_max = 15                    # most clips per Short (3-4 s each); only what the length needs, pictures (2-2.5 s) fill gaps

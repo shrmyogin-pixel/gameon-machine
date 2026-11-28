@@ -167,6 +167,16 @@ def check_news_and_watermark(cfg: Config) -> None:
         record(OK if png else WARN, "watermark", str(png) if png else "assets/watermark.jpg missing or unreadable; clips render without it")
 
 
+def check_watchlist(cfg: Config) -> None:
+    from . import hookbank, watchlist
+    wl = watchlist.load()
+    record(OK if wl else WARN, "watchlist", f"{sum(len(v) for v in wl['buckets'].values())} sources, metadata only"
+           if wl else "config/watchlist.json missing or invalid; news runs go without it")
+    bank = hookbank.load(hookbank.bank_path(cfg))
+    record(OK if bank else WARN, "hook bank", f"{len(bank['hooks'])} patterns" if bank
+           else "data/hook_bank.json missing or invalid; no hook patterns")
+
+
 def run_doctor(cfg: Config, deep: bool = False) -> int:
     print("gameon-clipper doctor\n")
     checks = [
@@ -177,6 +187,7 @@ def run_doctor(cfg: Config, deep: bool = False) -> int:
         lambda: check_claude(cfg, deep),
         lambda: check_files_and_data(cfg),
         lambda: check_news_and_watermark(cfg),
+        lambda: check_watchlist(cfg),
     ]
     for check in checks:  # one broken check must not stop the others
         try:

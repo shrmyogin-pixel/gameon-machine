@@ -87,6 +87,9 @@ EXTRA_COLUMNS = {
     "assign_slot": "TEXT",        # HUMAN choice: posting slot name from config [[slots]] (beats the automatic routing)
     "files_deleted_at": "TEXT",   # reject / mark-uploaded delete the clip folder; set when that happened
     "assign_target": "TEXT",      # HUMAN choice: 'youtube' (top 2-3) or 'other' platforms (beats the automatic routing)
+    "qa_warnings": "TEXT",        # JSON list from the post-render QA (qa.py); NULL = not checked, [] = passed
+    "hook_id": "TEXT",            # hook_bank.json pattern the Short's hook follows
+    "hook_feedback": "TEXT",      # what the dashboard has counted for it: approved | rejected | NULL
 }
 ASSIGN_TARGETS = ("youtube", "other")
 
@@ -200,7 +203,20 @@ def row_to_dict(row: sqlite3.Row) -> dict:
     d["meme_caption"] = _loads(d.get("meme_caption"))
     d["banger"] = bool(d.get("banger"))
     d["sensitive"] = bool(d.get("sensitive"))
+    d["qa_warnings"] = None if d.get("qa_warnings") is None else _loads(d["qa_warnings"])
     return d
+
+
+def set_qa(db_path: Path, folder: str, warnings: list[str]) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET qa_warnings = ?, updated_at = datetime('now') WHERE folder = ?",
+                     (json.dumps(warnings, ensure_ascii=False), folder))
+
+
+def set_hook(db_path: Path, folder: str, hook_id: str, feedback: str | None = None) -> None:
+    with connect(db_path) as conn:
+        conn.execute("UPDATE clips SET hook_id = ?, hook_feedback = ?, updated_at = datetime('now') WHERE folder = ?",
+                     (hook_id, feedback, folder))
 
 
 def list_clips(db_path: Path, status: str | None = None, handle: str | None = None, banger: bool | None = None,

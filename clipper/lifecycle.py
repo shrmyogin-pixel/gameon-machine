@@ -40,6 +40,18 @@ def normalize_url(url: str) -> str:
     return host + path.lower() + (("?" + urllib.parse.urlencode(query)) if query else "")
 
 
+AFFILIATE_PARAM = re.compile(r"^(utm_.*|aff|affid|aff_id|aff_sub\d*|affiliate(_id)?|irclickid|irgwc|clickid|awc|sscid|"
+                             r"ascsubtag|linkcode|subid)$", re.I)
+
+
+def clean_link(url: str) -> str:
+    """The same link without affiliate / campaign parameters, for the credit line (otherwise unchanged)."""
+    parts = urllib.parse.urlsplit(url or "")
+    pairs = parts.query.split("&") if parts.query else []
+    kept = [p for p in pairs if not AFFILIATE_PARAM.match(urllib.parse.unquote(p.split("=", 1)[0]))]
+    return url if len(kept) == len(pairs) else urllib.parse.urlunsplit(parts._replace(query="&".join(kept)))
+
+
 def _hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:20]
 

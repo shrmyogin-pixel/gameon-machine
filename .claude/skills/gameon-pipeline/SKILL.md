@@ -66,6 +66,26 @@ These are fixed. Change one only when the user explicitly asks for that change; 
 - Games the Steam store marks for gore or sexual content get no Steam trailers. Check all footage in review.
 - `tech.bat` or `python -m clipper news --topic tech`: gaming tech headlines only, pill `GAMING TECH`.
 
+## Watchlist, source check, QA and hook bank
+- `config/watchlist.json` is read by news, GTA, creators and tech runs, never promo: yt-dlp metadata only, cached
+  (`watchlist.py`). An outlier title is a signal, never a source: it only ranks and pairs stories the feeds report, and it
+  is not shown to the writer. No sponsored, deal or affiliate items; credit links lose affiliate parameters.
+- Its `badge_hint` values are not used: pill words stay the ones above.
+- Source check before any voiceover, B-roll or render (`factcheck.py`): link and outlet, numbers and months found in the
+  source, leaks and rumours labelled.
+- Post-render QA (`qa.py`): 1080x1920, video decodes, `Sources & Credits:` present. Warnings show on the dashboard only.
+- `data/hook_bank.json` (`hookbank.py`): use count at render; approval / rejection counts and a note from dashboard
+  actions, once per clip. Reject / Mark Uploaded still delete the folder at once.
+
+## Batch mode and dense Shorts
+- `banger12.bat` (`news --all-niches --count 12 --min-videos 12 --min-photos 22 --no-promo`, `batch.py`): up to 12
+  Shorts over every watchlist niche, strict round-robin, at most ceil(count / niches) per niche (3 of 12), even if that
+  leaves the batch short. No repeated story or game (GTA 6: angle), no repeated hook opening, one pattern at
+  most twice. Never promo, deal or sponsored items; no trend Shorts.
+- Dense Shorts (this mode, or `--min-videos` / `--min-photos`) need 10+ video cuts, or 20+ distinct pictures / clip
+  frames; otherwise the story is skipped. The flags say how many to try for. Only here, cuts are shorter than the usual
+  3-4 s / 2-2.5 s: video from 2.5 s, pictures from 1.2 s (the user asked for this density). Everything else is unchanged.
+
 ## Promo mode
 - `promo.bat` or `python -m clipper news --topic promo`: deals, discounts, bundles and gear spotlights, pill
   `GAME DEAL` or `TECH PICK` (same solid yellow).

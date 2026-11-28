@@ -293,6 +293,8 @@ function card(clip) {
     (clip.status === "posted" ? "marked uploaded" : "rejected") + "."));
   if (clip.skip_reason) root.append(h("div", { class: "note" }, "Skipped: " + clip.skip_reason));
   if (clip.error) root.append(h("div", { class: "warn" }, "Error: " + clip.error));
+  if ((clip.qa_warnings || []).length) root.append(h("div", { class: "warn qa" }, "QA warnings: " + clip.qa_warnings.join(" · ")));
+  else if (clip.qa_warnings) root.append(h("div", { class: "note" }, "QA passed: 1080x1920, video decodes, credit line present"));
   if (clip.hook) root.append(h("div", { class: "note" }, "Hook: " + clip.hook +
     ((clip.meme_caption || []).length ? "  |  Meme: " + clip.meme_caption.join(" / ") : "")));
 

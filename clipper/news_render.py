@@ -40,6 +40,17 @@ VIDEO_CUT = (3.0, 4.0)         # seconds a video clip stays on screen
 def clips_needed(seconds: float, cap: int) -> int:
     """How many clips fill a Short of this length on their own, at most `cap`."""
     return max(0, min(cap, math.ceil((seconds + TAIL_SECONDS) / (sum(VIDEO_CUT) / 2))))
+DENSE_VIDEOS, DENSE_PHOTOS = 10, 20      # a dense Short (--min-videos / banger12) shows at least this many of one kind
+DENSE_MAX_VIDEOS, DENSE_MAX_PHOTOS = 15, 24
+DENSE_CUT = {"video": 2.5, "photo": 1.2}      # shortest cut a dense Short may use, seconds
+
+
+def dense_count(total: float, have: int, kind: str) -> int:
+    """How many of `have` visuals a dense Short shows: all that fit without cutting faster than DENSE_CUT."""
+    most = DENSE_MAX_VIDEOS if kind == "video" else DENSE_MAX_PHOTOS
+    return min(have, most, int((total + 1e-9) // DENSE_CUT[kind]))
+
+
 XFADE = 0.4                    # seconds each transition overlaps the next picture
 TRANSITIONS = ["fade", "smoothleft", "slideleft", "smoothright", "wipeleft"]      # clean and calm: no spinning / zooming wipes
 
@@ -246,7 +257,16 @@ def _render(cfg: Config, folder: Path, info: dict, words: list, dur: float, visu
     seed = sum(map(ord, folder.name))
     if not visuals:
         raise RenderError("no usable real picture to show (placeholders are not allowed)")
-    segs = plan_segments(total, len(visuals), {i for i, v in enumerate(visuals) if is_video(v)})
+    dense = info.get("dense")
+    if dense:                                                  # every visual once, equal time each
+        floor = DENSE_VIDEOS if dense == "video" else DENSE_PHOTOS
+        n = dense_count(total, len(visuals), dense)
+        if n < floor:
+            raise RenderError(f"only {n} usable {dense} visual(s), a dense Short needs {floor}")
+        visuals = visuals[:n]
+        segs = [(i, total / n) for i in range(n)]
+    else:
+        segs = plan_segments(total, len(visuals), {i for i, v in enumerate(visuals) if is_video(v)})
     music_info = None
     try:
         args: list = []
