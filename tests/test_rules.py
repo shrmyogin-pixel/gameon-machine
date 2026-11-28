@@ -273,6 +273,35 @@ class PictureChoiceTests(unittest.TestCase):
         got = [u.rsplit("/", 1)[1] for u in newsimage.article_images(page, "https://x.com/a")]
         self.assertEqual(got, ["GTA-6-YouTube-trailer-screenshot.jpg", "GTA-6-Animal-Hunting.jpg"])
 
+    def test_only_the_article_bodys_own_pictures_are_taken(self):
+        from clipper import newsimage
+        text = "<p>" + "The patch changes how the mode plays for everyone. " * 5 + "</p>"
+        page = f"""<body><div class="hero"><img src="https://x.com/hero-outside.jpg"></div>
+          <article class="post tag-popular">
+            <div id="article-body">{text}{text}
+              <figure><img src="https://x.com/own-one.jpg"></figure>
+              <figure><a href="https://x.com/own-two.jpg"><img src="https://x.com/own-two-small.jpg"></a></figure>
+              <a href="https://shop.example/vacuum"><img src="https://x.com/vacuum-deal.jpg"></a>
+              <a href="/other-story/"><img src="https://x.com/other-story-card.jpg"></a>
+              <div class="related-posts"><img src="https://x.com/related-card.jpg"></div>
+              <div class="custom-widget-membership"><img src="https://x.com/join.jpg"></div>
+            </div>
+            <ol class="popular-box"><li><img src="https://x.com/vpn.jpg"></li></ol>
+          </article>
+          <section id="related"><article><a href="/b"><p>{"Another story. " * 40}</p><img src="https://x.com/b.jpg"></a></article></section>
+        </body>"""
+        got = [u.rsplit("/", 1)[1] for u in newsimage.article_images(page, "https://x.com/a")]
+        self.assertEqual(got, ["own-one.jpg", "own-two-small.jpg"])
+        self.assertEqual(newsimage.article_images('<div><img src="https://x.com/anything.jpg"></div>', "https://x.com/a"), [])
+
+    def test_a_websites_share_card_is_not_a_game_picture(self):
+        from clipper import imagesearch
+        for url in ("https://openclip.app/images/og/gta-6-footage-library.jpg", "https://x.com/assets/og-image.png",
+                    "https://x.com/social-card.jpg"):
+            self.assertTrue(imagesearch.is_share_card(url), url)
+        for url in ("https://x.com/uploads/gta-6-screenshot.jpg", "https://x.com/dogs/ogre-art.jpg"):
+            self.assertFalse(imagesearch.is_share_card(url), url)
+
     def test_video_thumbnails_are_never_used(self):
         from clipper import newsimage
         for url in ("https://i.ytimg.com/vi/abc/maxresdefault.jpg?v=1", "https://img.youtube.com/vi/abc/0.jpg",

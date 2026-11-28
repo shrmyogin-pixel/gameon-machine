@@ -116,9 +116,8 @@ class FindUrlTests(unittest.TestCase):
         self.assertEqual(got, ["https://cdn.x/og-hero.jpg",                                 # og first
                                "https://ign.com/media/body-one.jpg",                        # inside <article>, made absolute
                                "https://cdn.x/body-two-1600.jpg",                           # srcset: the widest
-                               "https://cdn.x/body-three-300x200.jpg",
-                               "https://cdn.x/outside-article.jpg"])                        # outside <article> last
-        for bad in ("logo", "tiny", "pixel", "drawing", "ad-unit", "header-banner", "nav.jpg", "sidebar", "footer"):
+                               "https://cdn.x/body-three-300x200.jpg"])                     # nothing from outside <article>
+        for bad in ("logo", "tiny", "pixel", "drawing", "ad-unit", "header-banner", "nav.jpg", "sidebar", "footer", "outside"):
             self.assertFalse(any(bad in u for u in got), bad)
 
     def test_upsized_and_identity(self):
